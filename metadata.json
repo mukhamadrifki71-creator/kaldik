@@ -1,0 +1,6 @@
+{
+  "name": "KaldikPAI - Analisis Kalender Pendidikan & Generator RPE Prota Promes",
+  "description": "Aplikasi analisis kalender pendidikan dan integrasi jadwal kegiatan sekolah dengan target kurikulum otomatis (RPE, Prota, Promes) untuk Guru PAI SDN Pohjentrek II Kota Pasuruan.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
