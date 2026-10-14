@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
-import { SchoolProfile, RPEData, ProtaItem, PromesItem, DayOfWeek } from '../types';
+import { SchoolProfile, RPEData, ProtaItem, PromesItem, DayOfWeek, CPMappingEntry } from '../types';
 import { exportRPEToWord, exportProtaToWord, exportPromesToWord } from '../utils/exportDocs';
+import { generateStandardCPMapping } from '../data/cpTpTemplates';
 import { 
   Printer, 
   Download, 
@@ -12,7 +13,8 @@ import {
   School,
   CheckCircle2,
   CalendarCheck,
-  GraduationCap
+  GraduationCap,
+  Columns
 } from 'lucide-react';
 
 interface PrintPreviewModalProps {
@@ -22,7 +24,8 @@ interface PrintPreviewModalProps {
   rpeData: RPEData;
   protaItems: ProtaItem[];
   promesItems: PromesItem[];
-  defaultDocType?: 'rpe' | 'prota' | 'promes';
+  cpData?: { sem1: CPMappingEntry[]; sem2: CPMappingEntry[] };
+  defaultDocType?: 'rpe' | 'prota' | 'promes' | 'cp_mapping';
   onChangePrintGrade?: (grade: number) => void;
 }
 
@@ -33,11 +36,14 @@ export const PrintPreviewModal: React.FC<PrintPreviewModalProps> = ({
   rpeData,
   protaItems,
   promesItems,
+  cpData,
   defaultDocType = 'rpe',
   onChangePrintGrade
 }) => {
-  const [docType, setDocType] = useState<'rpe' | 'prota' | 'promes'>(defaultDocType);
+  const [docType, setDocType] = useState<'rpe' | 'prota' | 'promes' | 'cp_mapping'>(defaultDocType);
   const selectedDay: DayOfWeek = profile.teachingDays?.[0] || 'Kamis';
+
+  const effectiveCPData = cpData || generateStandardCPMapping(profile.selectedGrade || 4);
 
   if (!isOpen) return null;
 
@@ -52,6 +58,64 @@ export const PrintPreviewModal: React.FC<PrintPreviewModalProps> = ({
       exportProtaToWord(profile, protaItems);
     } else if (docType === 'promes') {
       exportPromesToWord(profile, rpeData, promesItems);
+    } else if (docType === 'cp_mapping') {
+      const content = `
+        <html xmlns:o='urn:schemas-microsoft-com:office:office' xmlns:w='urn:schemas-microsoft-com:office:word' xmlns='http://www.w3.org/TR/REC-html40'>
+        <head>
+          <meta charset='utf-8'>
+          <title>Pemetaan CP dan Materi Esensial Kelas ${profile.selectedGrade}</title>
+          <style>
+            body { font-family: 'Times New Roman', serif; font-size: 11pt; line-height: 1.4; color: #000; }
+            h2, h3 { text-align: center; margin: 2px; }
+            table { width: 100%; border-collapse: collapse; margin-top: 15px; }
+            th, td { border: 1px solid #000; padding: 7px 10px; vertical-align: top; }
+            th { background-color: #f2f2f2; text-align: center; font-weight: bold; }
+          </style>
+        </head>
+        <body>
+          <h2>PEMETAAN CAPAIAN PEMBELAJARAN (CP) & MATERI ESENSIAL</h2>
+          <h3>${profile.schoolName.toUpperCase()} — TP ${profile.academicYear}</h3>
+          <p style="text-align: center;">Kelas: ${profile.selectedGrade} SD | Guru: ${profile.teacherName}</p>
+          <h3>A. SEMESTER 1 (GANJIL)</h3>
+          <table>
+            <thead>
+              <tr><th>No</th><th>Capaian Pembelajaran (CP) Berdasarkan Elemen</th><th>Materi Esensial</th></tr>
+            </thead>
+            <tbody>
+              ${effectiveCPData.sem1.map((it, idx) => `
+                <tr>
+                  <td style="text-align:center;">${idx + 1}</td>
+                  <td><strong>Elemen: ${it.element}</strong><br/>${it.cpDescription}</td>
+                  <td><ul>${it.essentialMaterials.map(m => `<li>${m}</li>`).join('')}</ul></td>
+                </tr>
+              `).join('')}
+            </tbody>
+          </table>
+          <h3 style="margin-top: 25px;">B. SEMESTER 2 (GENAP)</h3>
+          <table>
+            <thead>
+              <tr><th>No</th><th>Capaian Pembelajaran (CP) Berdasarkan Elemen</th><th>Materi Esensial</th></tr>
+            </thead>
+            <tbody>
+              ${effectiveCPData.sem2.map((it, idx) => `
+                <tr>
+                  <td style="text-align:center;">${idx + 1}</td>
+                  <td><strong>Elemen: ${it.element}</strong><br/>${it.cpDescription}</td>
+                  <td><ul>${it.essentialMaterials.map(m => `<li>${m}</li>`).join('')}</ul></td>
+                </tr>
+              `).join('')}
+            </tbody>
+          </table>
+        </body>
+        </html>
+      `;
+      const blob = new Blob([content], { type: 'application/msword' });
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement('a');
+      link.href = url;
+      link.download = `Pemetaan_CP_Materi_Kelas${profile.selectedGrade}.doc`;
+      link.click();
+      URL.revokeObjectURL(url);
     }
   };
 
@@ -134,6 +198,16 @@ export const PrintPreviewModal: React.FC<PrintPreviewModalProps> = ({
               <FileSpreadsheet className="w-3.5 h-3.5" />
               <span>3. Program Semester (Promes)</span>
             </button>
+
+            <button
+              onClick={() => setDocType('cp_mapping')}
+              className={`px-3 py-1.5 text-xs font-semibold rounded-lg flex items-center gap-1.5 transition-colors whitespace-nowrap ${
+                docType === 'cp_mapping' ? 'bg-white text-emerald-900 shadow-xs font-bold' : 'text-slate-600 hover:text-slate-900'
+              }`}
+            >
+              <Columns className="w-3.5 h-3.5" />
+              <span>4. Pemetaan CP & Materi (2 Kolom)</span>
+            </button>
           </div>
 
           {onChangePrintGrade && (
@@ -178,9 +252,10 @@ export const PrintPreviewModal: React.FC<PrintPreviewModalProps> = ({
                 {docType === 'rpe' && 'RINCIAN HARI & PEKAN EFEKTIF (RPE)'}
                 {docType === 'prota' && 'PROGRAM TAHUNAN (PROTA)'}
                 {docType === 'promes' && 'PROGRAM SEMESTER (PROMES)'}
+                {docType === 'cp_mapping' && 'PEMETAAN CAPAIAN PEMBELAJARAN (CP) & MATERI ESENSIAL'}
               </h2>
               <p className="text-xs font-bold mt-1">
-                {docType === 'prota' ? 'TAHUN PELAJARAN ' + profile.academicYear : `SEMESTER ${rpeData.semester === 1 ? 'GANJIL' : 'GENAP'} TAHUN PELAJARAN ${profile.academicYear}`}
+                {docType === 'prota' || docType === 'cp_mapping' ? 'TAHUN PELAJARAN ' + profile.academicYear : `SEMESTER ${rpeData.semester === 1 ? 'GANJIL' : 'GENAP'} TAHUN PELAJARAN ${profile.academicYear}`}
               </p>
               <p className="text-[11px] text-slate-800 mt-0.5">
                 Mata Pelajaran: Pendidikan Agama Islam & Budi Pekerti | Kelas: {profile.selectedGrade} SD
@@ -405,6 +480,85 @@ export const PrintPreviewModal: React.FC<PrintPreviewModalProps> = ({
                     ))}
                   </tbody>
                 </table>
+              </div>
+            )}
+
+            {/* CONTENT: PEMETAAN CP & MATERI ESENSIAL (2 KOLOM PER SEMESTER) */}
+            {docType === 'cp_mapping' && (
+              <div className="space-y-6 text-xs text-slate-900 leading-relaxed">
+                {/* Semester 1 */}
+                <div>
+                  <h4 className="font-bold text-xs mb-2 uppercase text-slate-900">A. SEMESTER 1 (GANJIL)</h4>
+                  <table className="w-full border-collapse border border-slate-900 text-xs">
+                    <thead>
+                      <tr className="bg-slate-100 text-center font-bold">
+                        <th className="border border-slate-900 p-2 w-10">No</th>
+                        <th className="border border-slate-900 p-2 w-1/2">Capaian Pembelajaran (CP) Berdasarkan Elemen</th>
+                        <th className="border border-slate-900 p-2 w-1/2">Materi Esensial (Ruang Lingkup Materi Pokok)</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {effectiveCPData.sem1.map((item, idx) => (
+                        <tr key={item.id}>
+                          <td className="border border-slate-900 p-2 text-center align-top font-bold">{idx + 1}</td>
+                          <td className="border border-slate-900 p-2 align-top">
+                            <strong className="text-emerald-950 block mb-1">Elemen: {item.element}</strong>
+                            <p className="m-0 leading-relaxed text-justify">{item.cpDescription}</p>
+                          </td>
+                          <td className="border border-slate-900 p-2 align-top">
+                            <ul className="m-0 pl-4 list-disc space-y-1">
+                              {item.essentialMaterials.map((mat, i) => (
+                                <li key={i} className="font-semibold">{mat}</li>
+                              ))}
+                            </ul>
+                            {item.subTopics && item.subTopics.length > 0 && (
+                              <p className="m-0 mt-2 text-[10px] text-slate-600 italic">
+                                Submateri: {item.subTopics.join(', ')}
+                              </p>
+                            )}
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+
+                {/* Semester 2 */}
+                <div>
+                  <h4 className="font-bold text-xs mb-2 uppercase text-slate-900">B. SEMESTER 2 (GENAP)</h4>
+                  <table className="w-full border-collapse border border-slate-900 text-xs">
+                    <thead>
+                      <tr className="bg-slate-100 text-center font-bold">
+                        <th className="border border-slate-900 p-2 w-10">No</th>
+                        <th className="border border-slate-900 p-2 w-1/2">Capaian Pembelajaran (CP) Berdasarkan Elemen</th>
+                        <th className="border border-slate-900 p-2 w-1/2">Materi Esensial (Ruang Lingkup Materi Pokok)</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {effectiveCPData.sem2.map((item, idx) => (
+                        <tr key={item.id}>
+                          <td className="border border-slate-900 p-2 text-center align-top font-bold">{idx + 1}</td>
+                          <td className="border border-slate-900 p-2 align-top">
+                            <strong className="text-emerald-950 block mb-1">Elemen: {item.element}</strong>
+                            <p className="m-0 leading-relaxed text-justify">{item.cpDescription}</p>
+                          </td>
+                          <td className="border border-slate-900 p-2 align-top">
+                            <ul className="m-0 pl-4 list-disc space-y-1">
+                              {item.essentialMaterials.map((mat, i) => (
+                                <li key={i} className="font-semibold">{mat}</li>
+                              ))}
+                            </ul>
+                            {item.subTopics && item.subTopics.length > 0 && (
+                              <p className="m-0 mt-2 text-[10px] text-slate-600 italic">
+                                Submateri: {item.subTopics.join(', ')}
+                              </p>
+                            )}
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
               </div>
             )}
 

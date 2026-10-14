@@ -1,5 +1,5 @@
 import { GoogleGenAI, Type } from '@google/genai';
-import { AIAnalysisResult, KaldikEvent } from '../types/index.ts';
+import type { AIAnalysisResult, KaldikEvent } from '../types/index.ts';
 import { KALDIK_PRESETS } from '../data/defaultKaldik.ts';
 
 // Shared Gemini AI Client

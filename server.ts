@@ -2,7 +2,7 @@ import express from 'express';
 import dotenv from 'dotenv';
 import path from 'path';
 import { fileURLToPath } from 'url';
-import { analyzeKaldikHandler, curriculumAssistantHandler } from './src/server/kaldikAnalyzer';
+import { analyzeKaldikHandler, curriculumAssistantHandler } from './src/server/kaldikAnalyzer.ts';
 
 dotenv.config();
 
@@ -36,13 +36,12 @@ app.post('/api/curriculum-assistant', async (req, res) => {
   }
 });
 
-// Serve static assets in production
-if (process.env.NODE_ENV === 'production') {
-  app.use(express.static(path.join(__dirname, 'dist')));
-  app.get('*', (req, res) => {
-    res.sendFile(path.join(__dirname, 'dist', 'index.html'));
-  });
-}
+// Serve static assets from Vite build
+const distPath = path.join(__dirname, 'dist');
+app.use(express.static(distPath));
+app.get('*', (req, res) => {
+  res.sendFile(path.join(distPath, 'index.html'));
+});
 
 app.listen(PORT, '0.0.0.0', () => {
   console.log(`Server listening on port ${PORT}`);

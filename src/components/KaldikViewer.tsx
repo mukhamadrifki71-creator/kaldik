@@ -59,6 +59,56 @@ export const KaldikViewer: React.FC<KaldikViewerProps> = ({
   const startYear = parseInt(startYearStr, 10) || 2024;
   const endYear = parseInt(endYearStr, 10) || startYear + 1;
 
+  // Exact semester effective days and school days calculation
+  const semesterStats = React.useMemo(() => {
+    const isSem1 = semester === 1;
+    const year = isSem1 ? startYear : endYear;
+    const mStart = isSem1 ? 6 : 0;
+    const mEnd = isSem1 ? 11 : 5;
+
+    let totalCal = 0;
+    let heb = 0;
+    let hes = 0;
+    let libur = 0;
+    let kegiatan = 0;
+
+    const startDate = new Date(year, mStart, 1);
+    const endDate = new Date(year, mEnd + 1, 0);
+
+    for (let d = new Date(startDate); d <= endDate; d.setDate(d.getDate() + 1)) {
+      totalCal++;
+      const dStr = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+      const dayOfWeek = d.getDay(); // 0 = Sunday
+
+      if (dayOfWeek === 0) {
+        libur++;
+        continue;
+      }
+
+      // Check events
+      const match = events.find(e => dStr >= e.startDate && dStr <= e.endDate);
+      if (!match) {
+        hes++;
+        heb++;
+      } else if (match.category === 'libur_nasional' || match.category === 'libur_keagamaan' || match.category === 'libur_semester') {
+        libur++;
+      } else if (match.category === 'asesmen') {
+        hes++;
+        kegiatan++;
+      } else if (match.category === 'kegiatan_sekolah') {
+        hes++;
+        kegiatan++;
+        if (!match.affectsKBM) heb++;
+      } else {
+        hes++;
+        heb++;
+      }
+    }
+
+    const weeks = Math.min(20, Math.max(16, Math.round(heb / 5.2)));
+    return { totalCal, heb, hes, libur, kegiatan, weeks };
+  }, [events, semester, startYear, endYear]);
+
   const filteredEvents = events.filter(e => {
     if (filterCategory !== 'all' && e.category !== filterCategory) return false;
 
@@ -190,6 +240,70 @@ export const KaldikViewer: React.FC<KaldikViewerProps> = ({
             <Plus className="w-4 h-4" />
             <span>Tambah Agenda Baru</span>
           </button>
+        </div>
+      </div>
+
+      {/* Ringkasan Presisi Hari Efektif Semester */}
+      <div className="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-5 gap-3.5">
+        <div className="bg-emerald-50 p-3.5 rounded-2xl border border-emerald-200 shadow-2xs">
+          <p className="text-[11px] font-bold text-emerald-800 uppercase tracking-wide flex items-center gap-1">
+            <CheckCircle2 className="w-3.5 h-3.5 text-emerald-700" />
+            Hari Efektif Belajar (HEB)
+          </p>
+          <p className="text-2xl font-black text-emerald-950 mt-1">
+            {semesterStats.heb} <span className="text-xs font-semibold text-emerald-700">Hari</span>
+          </p>
+          <p className="text-[11px] text-emerald-600 mt-0.5 font-medium">
+            Semester {semester === 1 ? '1' : '2'} • {semesterStats.weeks} Pekan Efektif KBM
+          </p>
+        </div>
+
+        <div className="bg-blue-50 p-3.5 rounded-2xl border border-blue-200 shadow-2xs">
+          <p className="text-[11px] font-bold text-blue-800 uppercase tracking-wide">
+            Hari Efektif Sekolah (HES)
+          </p>
+          <p className="text-2xl font-black text-blue-950 mt-1">
+            {semesterStats.hes} <span className="text-xs font-semibold text-blue-700">Hari</span>
+          </p>
+          <p className="text-[11px] text-blue-600 mt-0.5 font-medium">
+            Termasuk MPLS, STS, SAS & Asesmen
+          </p>
+        </div>
+
+        <div className="bg-rose-50 p-3.5 rounded-2xl border border-rose-200 shadow-2xs">
+          <p className="text-[11px] font-bold text-rose-800 uppercase tracking-wide">
+            Total Hari Libur
+          </p>
+          <p className="text-2xl font-black text-rose-950 mt-1">
+            {semesterStats.libur} <span className="text-xs font-semibold text-rose-700">Hari</span>
+          </p>
+          <p className="text-[11px] text-rose-600 mt-0.5 font-medium">
+            Libur Nasional, Agama & Semester
+          </p>
+        </div>
+
+        <div className="bg-amber-50 p-3.5 rounded-2xl border border-amber-200 shadow-2xs">
+          <p className="text-[11px] font-bold text-amber-900 uppercase tracking-wide">
+            Kegiatan & Asesmen
+          </p>
+          <p className="text-2xl font-black text-amber-950 mt-1">
+            {semesterStats.kegiatan} <span className="text-xs font-semibold text-amber-800">Hari</span>
+          </p>
+          <p className="text-[11px] text-amber-700 mt-0.5 font-medium">
+            MPLS, STS, SAS, ANBK, Pondok Ramadhan
+          </p>
+        </div>
+
+        <div className="col-span-2 sm:col-span-4 lg:col-span-1 bg-white p-3.5 rounded-2xl border border-slate-200 shadow-2xs flex flex-col justify-between">
+          <p className="text-[11px] font-bold text-slate-600 uppercase tracking-wide">
+            Hari Kalender Sem {semester}
+          </p>
+          <p className="text-2xl font-black text-slate-800 mt-1">
+            {semesterStats.totalCal} <span className="text-xs font-semibold text-slate-500">Hari</span>
+          </p>
+          <p className="text-[11px] text-slate-500 mt-0.5 font-medium">
+            {semester === 1 ? 'Juli s.d. Desember' : 'Januari s.d. Juni'}
+          </p>
         </div>
       </div>
 

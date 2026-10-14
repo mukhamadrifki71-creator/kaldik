@@ -1,4 +1,4 @@
-import { ProtaItem } from '../types';
+import type { ProtaItem } from '../types/index.ts';
 
 export interface GradeCurriculumData {
   grade: number;

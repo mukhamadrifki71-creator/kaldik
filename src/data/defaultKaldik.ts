@@ -1,5 +1,5 @@
-import { KaldikEvent, SchoolProfile } from '../types';
-import { getCurrentAcademicYear } from './cpTpTemplates';
+import type { KaldikEvent, SchoolProfile } from '../types/index.ts';
+import { getCurrentAcademicYear } from './cpTpTemplates.ts';
 
 export const DEFAULT_SCHOOL_PROFILE: SchoolProfile = {
   schoolName: 'SDN Pohjentrek II Kota Pasuruan',

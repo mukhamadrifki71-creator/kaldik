@@ -1,7 +1,8 @@
 import React, { useState, useMemo } from 'react';
-import { ProtaItem, SchoolProfile, PAIElement, SemesterType, DayOfWeek, KaldikEvent } from '../types';
+import { ProtaItem, SchoolProfile, PAIElement, SemesterType, DayOfWeek, KaldikEvent, CPMappingEntry } from '../types';
 import { exportProtaToWord, exportToCSV } from '../utils/exportDocs';
 import { calculateSemesterRPE } from '../utils/calculator';
+import { CPMappingView } from './CPMappingView';
 import { 
   BookOpen, 
   Plus, 
@@ -18,7 +19,9 @@ import {
   Clock,
   CheckCircle2,
   AlertTriangle,
-  Info
+  Info,
+  Layers,
+  Columns
 } from 'lucide-react';
 
 interface ProtaViewProps {
@@ -31,6 +34,9 @@ interface ProtaViewProps {
   onResetDefaultCurriculum: () => void;
   onOpenCPTPModal?: () => void;
   onUpdateTeachingDay?: (day: DayOfWeek) => void;
+  cpData?: { sem1: CPMappingEntry[]; sem2: CPMappingEntry[] };
+  onUpdateCPData?: (data: { sem1: CPMappingEntry[]; sem2: CPMappingEntry[] }) => void;
+  currentSemester?: SemesterType;
 }
 
 const ELEMENT_COLORS: Record<PAIElement, { bg: string; text: string; border: string }> = {
@@ -52,8 +58,12 @@ export const ProtaView: React.FC<ProtaViewProps> = ({
   onOpenPrint,
   onResetDefaultCurriculum,
   onOpenCPTPModal,
-  onUpdateTeachingDay
+  onUpdateTeachingDay,
+  cpData,
+  onUpdateCPData,
+  currentSemester = 1
 }) => {
+  const [protaSubTab, setProtaSubTab] = useState<'cp_mapping' | 'prota_table'>('cp_mapping');
   const [editingItemId, setEditingItemId] = useState<string | null>(null);
   const [showAddForm, setShowAddForm] = useState<boolean>(false);
   const [filterSemester, setFilterSemester] = useState<number | 'all'>('all');
@@ -335,8 +345,55 @@ export const ProtaView: React.FC<ProtaViewProps> = ({
         </div>
       </div>
 
-      {/* RPE & Teaching Day Sync Cards */}
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+      {/* Sub-tab Navigation: CP 2-Kolom vs Tabel Prota */}
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 bg-white p-2.5 rounded-2xl border border-slate-200 shadow-2xs">
+        <div className="flex items-center gap-1.5 bg-slate-100 p-1 rounded-xl">
+          <button
+            onClick={() => setProtaSubTab('cp_mapping')}
+            className={`px-4 py-2 rounded-lg text-xs font-bold transition-all flex items-center gap-1.5 ${
+              protaSubTab === 'cp_mapping'
+                ? 'bg-emerald-700 text-white shadow-xs'
+                : 'text-slate-600 hover:text-slate-900 hover:bg-slate-200/60'
+            }`}
+          >
+            <Columns className="w-4 h-4" />
+            <span>Pemetaan CP & Materi Esensial (Format 2 Kolom Per Semester)</span>
+          </button>
+
+          <button
+            onClick={() => setProtaSubTab('prota_table')}
+            className={`px-4 py-2 rounded-lg text-xs font-bold transition-all flex items-center gap-1.5 ${
+              protaSubTab === 'prota_table'
+                ? 'bg-emerald-700 text-white shadow-xs'
+                : 'text-slate-600 hover:text-slate-900 hover:bg-slate-200/60'
+            }`}
+          >
+            <BookOpen className="w-4 h-4" />
+            <span>Tabel Program Tahunan (Prota & Alokasi JP)</span>
+          </button>
+        </div>
+
+        <div className="text-xs text-slate-500 font-medium px-2 hidden lg:block">
+          {protaSubTab === 'cp_mapping' 
+            ? 'Kolom Kiri: CP Berdasarkan Elemen • Kolom Kanan: Materi Esensial Per Semester' 
+            : 'Distribusi jam tatap muka, rincian bab, dan alokasi pertemuan PAI SD'}
+        </div>
+      </div>
+
+      {/* Conditional Sub-tab Content */}
+      {protaSubTab === 'cp_mapping' && cpData && onUpdateCPData ? (
+        <CPMappingView
+          grade={profile.selectedGrade}
+          profile={profile}
+          cpData={cpData}
+          onUpdateCPData={onUpdateCPData}
+          onOpenPrint={onOpenPrint}
+          currentSemester={currentSemester}
+        />
+      ) : (
+        <>
+          {/* RPE & Teaching Day Sync Cards */}
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
         {/* KPI 1: Overall JP */}
         <div className="bg-white p-4 rounded-2xl border border-slate-200 shadow-xs flex flex-col justify-between">
           <div className="flex items-center justify-between">
@@ -926,6 +983,8 @@ export const ProtaView: React.FC<ProtaViewProps> = ({
           </table>
         </div>
       </div>
+      </>
+      )}
     </div>
   );
 };

@@ -5,7 +5,8 @@ import {
   SemesterType, 
   ProtaItem, 
   AIAnalysisResult,
-  DayOfWeek
+  DayOfWeek,
+  CPMappingEntry
 } from './types';
 import { DEFAULT_SCHOOL_PROFILE } from './data/defaultKaldik';
 import { PAI_CURRICULUM_DATABASE } from './data/paiCurriculum';
@@ -16,13 +17,16 @@ import {
   loadSavedAnalysisResult, 
   saveAnalysisResult,
   loadSavedSchoolProfile,
-  saveSchoolProfile
+  saveSchoolProfile,
+  loadSavedCPMapping,
+  saveCPMapping
 } from './utils/kaldikStorage';
 
 // Components
 import { Navbar } from './components/Navbar';
 import { KaldikViewer } from './components/KaldikViewer';
 import { RPEView } from './components/RPEView';
+import { CPMappingView } from './components/CPMappingView';
 import { ProtaView } from './components/ProtaView';
 import { PromesView } from './components/PromesView';
 import { AIIntegratorView } from './components/AIIntegratorView';
@@ -38,7 +42,7 @@ export default function App() {
   });
 
   const [semester, setSemester] = useState<SemesterType>(1);
-  const [activeTab, setActiveTab] = useState<'kaldik' | 'rpe' | 'prota' | 'promes' | 'ai_assistant'>('kaldik');
+  const [activeTab, setActiveTab] = useState<'kaldik' | 'rpe' | 'cp_mapping' | 'prota' | 'promes' | 'ai_assistant'>('kaldik');
 
   // Master Kalender Pendidikan (Tersimpan di localStorage untuk Tahun Pelajaran aktif dan berlaku untuk semua kelas)
   const [events, setEvents] = useState<KaldikEvent[]>(() => {
@@ -59,6 +63,11 @@ export default function App() {
       teachingDay: currentDay,
       numberOfMeetings: c.numberOfMeetings || Math.max(1, Math.round(c.allocatedHours / 4))
     })) : [];
+  });
+
+  // Pemetaan CP & Materi Esensial (Format 2 Kolom Per Semester)
+  const [cpData, setCPData] = useState(() => {
+    return loadSavedCPMapping(profile.selectedGrade || 4);
   });
 
   // Alokasi manual per minggu pada Promes
@@ -85,6 +94,11 @@ export default function App() {
     saveSchoolProfile(profile);
   }, [profile]);
 
+  // Simpan pemetaan CP saat diperbarui
+  useEffect(() => {
+    saveCPMapping(profile.selectedGrade, cpData);
+  }, [cpData, profile.selectedGrade]);
+
   // Kembalikan fungsi ganti kelas ke fungsi semula:
   // Memilih kelas langsung memuat kurikulum resmi PAI kelas tersebut, sementara Kalender Pendidikan yang sudah disimpan tetap aktif.
   const handleChangeGrade = (newGrade: number) => {
@@ -102,6 +116,7 @@ export default function App() {
         numberOfMeetings: c.numberOfMeetings || Math.max(1, Math.round(c.allocatedHours / 4))
       })));
     }
+    setCPData(loadSavedCPMapping(newGrade));
     setCustomPromesAllocations({});
   };
 
@@ -243,6 +258,18 @@ export default function App() {
           />
         )}
 
+        {activeTab === 'cp_mapping' && (
+          <CPMappingView
+            grade={profile.selectedGrade}
+            profile={profile}
+            cpData={cpData}
+            onUpdateCPData={setCPData}
+            onSyncToProta={(newItems) => setProtaItems(newItems)}
+            onOpenPrint={() => setIsPrintOpen(true)}
+            currentSemester={semester}
+          />
+        )}
+
         {activeTab === 'prota' && (
           <ProtaView
             protaItems={protaItems}
@@ -254,6 +281,9 @@ export default function App() {
             onResetDefaultCurriculum={handleResetDefaultCurriculum}
             onOpenCPTPModal={() => setIsCPTPOpen(true)}
             onUpdateTeachingDay={handleUpdateTeachingDay}
+            cpData={cpData}
+            onUpdateCPData={setCPData}
+            currentSemester={semester}
           />
         )}
 
@@ -325,6 +355,7 @@ export default function App() {
         rpeData={rpeData}
         protaItems={protaItems}
         promesItems={promesItems}
+        cpData={cpData}
         onChangePrintGrade={handleChangeGrade}
       />
     </div>

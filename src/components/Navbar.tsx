@@ -9,12 +9,13 @@ import {
   Settings, 
   School,
   GraduationCap,
-  Award
+  Award,
+  Columns
 } from 'lucide-react';
 
 interface NavbarProps {
-  activeTab: 'kaldik' | 'rpe' | 'prota' | 'promes' | 'ai_assistant';
-  setActiveTab: (tab: 'kaldik' | 'rpe' | 'prota' | 'promes' | 'ai_assistant') => void;
+  activeTab: 'kaldik' | 'rpe' | 'cp_mapping' | 'prota' | 'promes' | 'ai_assistant';
+  setActiveTab: (tab: 'kaldik' | 'rpe' | 'cp_mapping' | 'prota' | 'promes' | 'ai_assistant') => void;
   profile: SchoolProfile;
   semester: SemesterType;
   setSemester: (sem: SemesterType) => void;
@@ -83,6 +84,19 @@ export const Navbar: React.FC<NavbarProps> = ({
             >
               <FileSpreadsheet className="w-3.5 h-3.5" />
               <span>RPE (Pekan Efektif)</span>
+            </button>
+
+            <button
+              onClick={() => setActiveTab('cp_mapping')}
+              className={`flex items-center space-x-1.5 px-3 py-1.5 rounded-lg text-xs font-medium transition-all ${
+                activeTab === 'cp_mapping'
+                  ? 'bg-emerald-600 text-white shadow-sm font-bold'
+                  : 'text-emerald-200 hover:text-white hover:bg-emerald-800/50'
+              }`}
+              title="Pemetaan CP Elemen & Materi Esensial (2 Kolom Per Semester)"
+            >
+              <Columns className="w-3.5 h-3.5" />
+              <span>Pemetaan CP (2 Kolom)</span>
             </button>
 
             <button
@@ -223,6 +237,14 @@ export const Navbar: React.FC<NavbarProps> = ({
             }`}
           >
             RPE
+          </button>
+          <button
+            onClick={() => setActiveTab('cp_mapping')}
+            className={`px-2.5 py-1 rounded-md whitespace-nowrap ${
+              activeTab === 'cp_mapping' ? 'bg-emerald-600 font-bold text-white' : 'text-emerald-200'
+            }`}
+          >
+            Pemetaan CP
           </button>
           <button
             onClick={() => setActiveTab('prota')}

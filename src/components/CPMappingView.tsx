@@ -1,6 +1,8 @@
 import React, { useState } from 'react';
-import { CPMappingEntry, SchoolProfile, SemesterType, PAIElement, ProtaItem } from '../types';
+import type { CPMappingEntry, SchoolProfile, SemesterType, PAIElement, ProtaItem } from '../types/index.ts';
 import { generateStandardCPMapping } from '../data/cpTpTemplates';
+import { getSupabaseConfig, getStandard84AnalyzedTP, applySupabaseTPToCPMapping } from '../services/supabaseService';
+import { SupabaseSyncModal } from './SupabaseSyncModal';
 import { 
   BookOpen, 
   Edit3, 
@@ -18,7 +20,13 @@ import {
   CheckCircle2,
   Calendar,
   Clock,
-  ArrowRight
+  ArrowRight,
+  Database,
+  ExternalLink,
+  RefreshCw,
+  X,
+  ShieldCheck,
+  ListOrdered
 } from 'lucide-react';
 
 interface CPMappingViewProps {
@@ -51,11 +59,35 @@ export const CPMappingView: React.FC<CPMappingViewProps> = ({
   const [activeSemester, setActiveSemester] = useState<SemesterType | 'all'>(currentSemester);
   const [editingEntryId, setEditingEntryId] = useState<string | null>(null);
   const [newMaterialInputs, setNewMaterialInputs] = useState<Record<string, string>>({});
+  const [newTPInputs, setNewTPInputs] = useState<Record<string, string>>({});
+  const [editingTP, setEditingTP] = useState<{ id: string; index: number } | null>(null);
   const [showAddElementModal, setShowAddElementModal] = useState<boolean>(false);
+  const [showSupabaseModal, setShowSupabaseModal] = useState<boolean>(false);
+  const [supabaseNotification, setSupabaseNotification] = useState<string | null>(null);
   const [newElementSemester, setNewElementSemester] = useState<SemesterType>(1);
   const [newElementName, setNewElementName] = useState<PAIElement>("Al-Qur'an Hadis");
   const [newElementCP, setNewElementCP] = useState<string>('');
   const [newElementMaterials, setNewElementMaterials] = useState<string>('');
+
+  const supabaseConfig = getSupabaseConfig();
+  const isSupabaseConfigured = Boolean(supabaseConfig.url && supabaseConfig.anonKey);
+
+  // Precision 84 calculations
+  const sem1TPCount = cpData.sem1.reduce((acc, item) => acc + (item.learningObjectives?.length || 0), 0);
+  const sem2TPCount = cpData.sem2.reduce((acc, item) => acc + (item.learningObjectives?.length || 0), 0);
+  const totalTPCount = sem1TPCount + sem2TPCount;
+  const is84Exact = totalTPCount === 84;
+
+  // Direct load 84 analyzed TP
+  const handleLoad84TPDirectly = () => {
+    const std = getStandard84AnalyzedTP();
+    const updated = applySupabaseTPToCPMapping(cpData, std, { updateMaterials: true });
+    onUpdateCPData(updated);
+    setSupabaseNotification('Berhasil menerapkan 84 Butir Tujuan Pembelajaran Hasil Analisis secara presisi (42 butir Sem 1, 42 butir Sem 2)!');
+    setTimeout(() => {
+      setSupabaseNotification(null);
+    }, 5000);
+  };
 
   const currentItems = activeSemester === 'all'
     ? [...cpData.sem1, ...cpData.sem2]
@@ -115,6 +147,97 @@ export const CPMappingView: React.FC<CPMappingViewProps> = ({
       return item;
     });
     onUpdateCPData({ ...cpData, [semKey]: updated });
+  };
+
+  // Add learning objective (TP hasil analisa) to an entry
+  const handleAddTP = (id: string, sem: SemesterType) => {
+    const text = (newTPInputs[id] || '').trim();
+    if (!text) return;
+
+    const semKey = sem === 1 ? 'sem1' : 'sem2';
+    const updated = cpData[semKey].map(item => {
+      if (item.id === id) {
+        const currentTP = item.learningObjectives || [];
+        return {
+          ...item,
+          learningObjectives: [...currentTP, text]
+        };
+      }
+      return item;
+    });
+
+    onUpdateCPData({ ...cpData, [semKey]: updated });
+    setNewTPInputs(prev => ({ ...prev, [id]: '' }));
+  };
+
+  // Edit learning objective item
+  const handleUpdateTP = (id: string, sem: SemesterType, itemIndex: number, newText: string) => {
+    const semKey = sem === 1 ? 'sem1' : 'sem2';
+    const updated = cpData[semKey].map(item => {
+      if (item.id === id) {
+        const list = [...(item.learningObjectives || [])];
+        list[itemIndex] = newText.trim();
+        return { ...item, learningObjectives: list };
+      }
+      return item;
+    });
+    onUpdateCPData({ ...cpData, [semKey]: updated });
+    setEditingTP(null);
+  };
+
+  // Remove learning objective item
+  const handleRemoveTP = (id: string, sem: SemesterType, itemIndex: number) => {
+    const semKey = sem === 1 ? 'sem1' : 'sem2';
+    const updated = cpData[semKey].map(item => {
+      if (item.id === id) {
+        return {
+          ...item,
+          learningObjectives: (item.learningObjectives || []).filter((_, idx) => idx !== itemIndex)
+        };
+      }
+      return item;
+    });
+    onUpdateCPData({ ...cpData, [semKey]: updated });
+  };
+
+  // Handle data applied from Supabase modal
+  const handleApplySupabaseData = (updated: { sem1: CPMappingEntry[]; sem2: CPMappingEntry[] }) => {
+    onUpdateCPData(updated);
+    setSupabaseNotification('Tujuan Pembelajaran (TP) Hasil Analisa dari Supabase berhasil disinkronkan ke Pemetaan CP Kelas ' + grade + '!');
+    setTimeout(() => {
+      setSupabaseNotification(null);
+    }, 5000);
+  };
+
+  // Sync TP to Prota if onSyncToProta is provided
+  const handleSyncTPToProta = () => {
+    if (!onSyncToProta) return;
+    const allEntries = [...cpData.sem1, ...cpData.sem2];
+    const protaItemsToSync: ProtaItem[] = [];
+    let chapNum = 1;
+
+    allEntries.forEach(entry => {
+      if (entry.essentialMaterials && entry.essentialMaterials.length > 0) {
+        entry.essentialMaterials.forEach(mat => {
+          protaItemsToSync.push({
+            id: `prota_sync_${entry.semester}_${chapNum}`,
+            semester: entry.semester,
+            chapterNumber: chapNum++,
+            element: entry.element,
+            chapterTitle: mat.replace(/^Bab\s*\d+\s*:\s*/i, ''),
+            learningObjectives: entry.learningObjectives && entry.learningObjectives.length > 0
+              ? [...entry.learningObjectives]
+              : [`Memahami dan mengamalkan materi ${mat}`],
+            allocatedHours: 12,
+            teachingDay: profile.teachingDays?.[0] || 'Kamis',
+            numberOfMeetings: 3
+          });
+        });
+      }
+    });
+
+    onSyncToProta(protaItemsToSync);
+    alert(`Berhasil menyinkronkan ${protaItemsToSync.length} bab Prota beserta Tujuan Pembelajaran hasil analisa!`);
   };
 
   // Delete an entire entry
@@ -204,6 +327,14 @@ export const CPMappingView: React.FC<CPMappingViewProps> = ({
                 <td>
                   <strong>Elemen: ${item.element}</strong><br/>
                   ${item.cpDescription}
+                  ${item.learningObjectives && item.learningObjectives.length > 0 ? `
+                    <div style="margin-top: 8px; font-size: 10pt; background-color: #f0fdf4; padding: 6px 8px; border-left: 3px solid #046c4e;">
+                      <strong style="color: #046c4e;">Tujuan Pembelajaran (Hasil Analisa):</strong>
+                      <ul style="margin: 4px 0 0 0; padding-left: 18px;">
+                        ${item.learningObjectives.map(tp => `<li>${tp}</li>`).join('')}
+                      </ul>
+                    </div>
+                  ` : ''}
                 </td>
                 <td>
                   <ul style="margin: 0; padding-left: 18px;">
@@ -237,6 +368,14 @@ export const CPMappingView: React.FC<CPMappingViewProps> = ({
                 <td>
                   <strong>Elemen: ${item.element}</strong><br/>
                   ${item.cpDescription}
+                  ${item.learningObjectives && item.learningObjectives.length > 0 ? `
+                    <div style="margin-top: 8px; font-size: 10pt; background-color: #f0fdf4; padding: 6px 8px; border-left: 3px solid #046c4e;">
+                      <strong style="color: #046c4e;">Tujuan Pembelajaran (Hasil Analisa):</strong>
+                      <ul style="margin: 4px 0 0 0; padding-left: 18px;">
+                        ${item.learningObjectives.map(tp => `<li>${tp}</li>`).join('')}
+                      </ul>
+                    </div>
+                  ` : ''}
                 </td>
                 <td>
                   <ul style="margin: 0; padding-left: 18px;">
@@ -306,9 +445,58 @@ export const CPMappingView: React.FC<CPMappingViewProps> = ({
           <p className="text-xs text-slate-600 mt-0.5">
             Kolom kiri memuat <strong>Capaian Pembelajaran (CP) Berdasarkan Elemen</strong>, kolom kanan memuat <strong>Materi Esensial</strong>, terorganisasi presisi per semester.
           </p>
+          <div className="flex items-center gap-2 mt-2 flex-wrap">
+            <span className={`text-[11px] font-bold px-2.5 py-0.5 rounded-lg flex items-center gap-1.5 ${
+              is84Exact 
+                ? 'bg-emerald-100 text-emerald-900 border border-emerald-300' 
+                : 'bg-slate-100 text-slate-700 border border-slate-200'
+            }`}>
+              <ShieldCheck className="w-3.5 h-3.5 text-emerald-700" />
+              <span>Total TP Hasil Analisis: <strong>{totalTPCount} Butir</strong> {is84Exact ? '✓ Presisi 84/84 (Sem 1: 42, Sem 2: 42)' : '(Target: 84 Butir)'}</span>
+            </span>
+            <span className="text-[11px] font-medium text-emerald-900 bg-emerald-50 px-2 py-0.5 rounded border border-emerald-200">
+              Kolom: <strong>tujuan pembelajaran hasil analisis</strong> (sementara diabaikan)
+            </span>
+          </div>
         </div>
 
         <div className="flex items-center gap-2 flex-wrap">
+          <button
+            onClick={() => setShowSupabaseModal(true)}
+            className="px-3.5 py-2 bg-emerald-800 hover:bg-emerald-700 text-white rounded-xl text-xs font-bold transition-all flex items-center gap-1.5 shadow-sm border border-emerald-600/60"
+            title="Ambil Tujuan Pembelajaran (TP) Hasil Analisis langsung dari database Supabase Anda"
+          >
+            <Database className="w-3.5 h-3.5 text-emerald-300" />
+            <span>Tarik dari Supabase</span>
+            <span className="text-[10px] bg-emerald-700/80 text-emerald-200 px-1.5 py-0.2 rounded font-extrabold border border-emerald-500/50">
+              84 TP
+            </span>
+          </button>
+
+          <button
+            onClick={handleLoad84TPDirectly}
+            className={`px-3.5 py-2 rounded-xl text-xs font-bold transition-all flex items-center gap-1.5 border shadow-2xs ${
+              is84Exact 
+                ? 'bg-emerald-100 hover:bg-emerald-200 text-emerald-900 border-emerald-300' 
+                : 'bg-emerald-700 hover:bg-emerald-600 text-white border-emerald-600'
+            }`}
+            title="Terapkan langsung 84 butir TP Hasil Analisis (42 Sem 1, 42 Sem 2) secara presisi"
+          >
+            <Sparkles className="w-3.5 h-3.5 text-emerald-400" />
+            <span>{is84Exact ? '✓ 84 TP Presisi Aktif' : 'Muat 84 TP Hasil Analisis'}</span>
+          </button>
+
+          {onSyncToProta && (
+            <button
+              onClick={handleSyncTPToProta}
+              className="px-3.5 py-2 bg-emerald-50 hover:bg-emerald-100 text-emerald-800 border border-emerald-300 rounded-xl text-xs font-bold transition-colors flex items-center gap-1.5"
+              title="Sinkronkan butir TP hasil analisa ke Program Tahunan (Prota)"
+            >
+              <Sparkles className="w-3.5 h-3.5 text-emerald-600" />
+              <span>Sinkron ke Prota</span>
+            </button>
+          )}
+
           <button
             onClick={() => setShowAddElementModal(true)}
             className="px-3.5 py-2 bg-emerald-700 hover:bg-emerald-600 text-white rounded-xl text-xs font-bold transition-all flex items-center gap-1.5 shadow-sm"
@@ -346,6 +534,41 @@ export const CPMappingView: React.FC<CPMappingViewProps> = ({
           </button>
         </div>
       </div>
+
+      {/* Supabase Notification Banner */}
+      {supabaseNotification && (
+        <div className="p-3.5 bg-emerald-50 border border-emerald-300 rounded-2xl flex items-center justify-between gap-3 text-xs text-emerald-900 animate-in fade-in slide-in-from-top-2">
+          <div className="flex items-center gap-2">
+            <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0" />
+            <span className="font-semibold">{supabaseNotification}</span>
+          </div>
+          <button
+            onClick={() => setSupabaseNotification(null)}
+            className="text-emerald-700 hover:text-emerald-950 p-1"
+          >
+            <X className="w-3.5 h-3.5" />
+          </button>
+        </div>
+      )}
+
+      {/* Supabase Status Chip if configured */}
+      {isSupabaseConfigured && !supabaseNotification && (
+        <div className="px-4 py-2 bg-emerald-950 text-emerald-100 rounded-xl flex items-center justify-between text-xs border border-emerald-900 shadow-2xs">
+          <div className="flex items-center gap-2">
+            <Database className="w-3.5 h-3.5 text-emerald-400" />
+            <span>Sumber TP: <strong>Database Supabase</strong> ({supabaseConfig.tableName})</span>
+            <span className="w-1.5 h-1.5 rounded-full bg-emerald-400"></span>
+            <span className="text-emerald-300/80 text-[11px]">Tujuan Pembelajaran siap disinkronkan</span>
+          </div>
+          <button
+            onClick={() => setShowSupabaseModal(true)}
+            className="text-emerald-300 hover:text-white underline font-semibold flex items-center gap-1 text-[11px]"
+          >
+            <RefreshCw className="w-3 h-3" />
+            <span>Tarik Ulang / Atur Tabel</span>
+          </button>
+        </div>
+      )}
 
       {/* Semester Switcher Bar */}
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 bg-white p-3 rounded-2xl border border-slate-200 shadow-2xs">
@@ -500,19 +723,116 @@ export const CPMappingView: React.FC<CPMappingViewProps> = ({
                           </div>
                         )}
 
-                        {/* Learning Objectives indicator list */}
-                        {item.learningObjectives && item.learningObjectives.length > 0 && (
-                          <details className="text-[11px] text-slate-500 mt-2">
-                            <summary className="cursor-pointer font-semibold text-emerald-800 hover:underline">
-                              Lihat {item.learningObjectives.length} Butir Tujuan Pembelajaran (TP) Terkait
-                            </summary>
-                            <ul className="mt-1.5 space-y-1 pl-4 list-disc text-slate-600">
-                              {item.learningObjectives.map((tp, i) => (
-                                <li key={i}>{tp}</li>
-                              ))}
-                            </ul>
-                          </details>
-                        )}
+                        {/* Tujuan Pembelajaran Hasil Analisa Block */}
+                        <div className="mt-3 bg-gradient-to-br from-emerald-50/80 to-teal-50/40 p-3 rounded-xl border border-emerald-200 shadow-2xs space-y-2">
+                          <div className="flex items-center justify-between gap-1 flex-wrap">
+                            <div className="flex items-center gap-1.5">
+                              <span className="w-5 h-5 rounded-md bg-emerald-700 text-white flex items-center justify-center text-[10px] font-bold shadow-2xs">
+                                TP
+                              </span>
+                              <span className="text-[11px] font-bold text-emerald-950">
+                                Tujuan Pembelajaran (Hasil Analisa)
+                              </span>
+                              {item.notes?.includes('Supabase') && (
+                                <span className="bg-emerald-200/80 text-emerald-900 text-[9px] font-extrabold px-1.5 py-0.2 rounded-full border border-emerald-300">
+                                  Supabase
+                                </span>
+                              )}
+                            </div>
+                            <span className="text-[10px] font-semibold text-emerald-800 bg-white/80 px-2 py-0.5 rounded-full border border-emerald-200">
+                              {item.learningObjectives?.length || 0} Butir
+                            </span>
+                          </div>
+
+                          {/* TP Items List */}
+                          <div className="space-y-1.5">
+                            {(!item.learningObjectives || item.learningObjectives.length === 0) ? (
+                              <p className="text-[11px] text-slate-500 italic py-1">
+                                Belum ada butir TP hasil analisa. Tarik langsung dari database Supabase Anda atau tambah manual.
+                              </p>
+                            ) : (
+                              item.learningObjectives.map((tp, tpIdx) => (
+                                <div key={tpIdx} className="group/tp flex items-start gap-2 p-2 bg-white/95 rounded-lg border border-emerald-100/90 text-xs text-slate-800 hover:border-emerald-300 transition-colors shadow-2xs">
+                                  <span className="mt-0.5 w-4 h-4 rounded-full bg-emerald-100 text-emerald-800 font-bold flex items-center justify-center text-[9px] shrink-0">
+                                    {tpIdx + 1}
+                                  </span>
+                                  <div className="flex-1 text-[11px] leading-relaxed">
+                                    {editingTP?.id === item.id && editingTP?.index === tpIdx ? (
+                                      <div className="flex items-center gap-1">
+                                        <input
+                                          type="text"
+                                          defaultValue={tp}
+                                          id={`edit_tp_${item.id}_${tpIdx}`}
+                                          className="flex-1 px-2 py-1 bg-white border border-emerald-500 rounded text-xs focus:outline-none"
+                                          onKeyDown={(e) => {
+                                            if (e.key === 'Enter') {
+                                              handleUpdateTP(item.id, item.semester, tpIdx, (e.target as HTMLInputElement).value);
+                                            }
+                                          }}
+                                        />
+                                        <button
+                                          type="button"
+                                          onClick={() => {
+                                            const el = document.getElementById(`edit_tp_${item.id}_${tpIdx}`) as HTMLInputElement;
+                                            if (el) handleUpdateTP(item.id, item.semester, tpIdx, el.value);
+                                          }}
+                                          className="p-1 text-emerald-700 hover:bg-emerald-50 rounded"
+                                        >
+                                          <Check className="w-3.5 h-3.5" />
+                                        </button>
+                                      </div>
+                                    ) : (
+                                      <span>{tp}</span>
+                                    )}
+                                  </div>
+                                  <div className="opacity-0 group-hover/tp:opacity-100 flex items-center gap-0.5 transition-opacity shrink-0">
+                                    <button
+                                      type="button"
+                                      onClick={() => setEditingTP(editingTP?.id === item.id && editingTP?.index === tpIdx ? null : { id: item.id, index: tpIdx })}
+                                      className="p-1 text-slate-400 hover:text-emerald-700 rounded transition-colors"
+                                      title="Edit butir TP ini"
+                                    >
+                                      <Edit3 className="w-3 h-3" />
+                                    </button>
+                                    <button
+                                      type="button"
+                                      onClick={() => handleRemoveTP(item.id, item.semester, tpIdx)}
+                                      className="p-1 text-slate-400 hover:text-rose-600 rounded transition-colors"
+                                      title="Hapus TP ini"
+                                    >
+                                      <X className="w-3 h-3" />
+                                    </button>
+                                  </div>
+                                </div>
+                              ))
+                            )}
+                          </div>
+
+                          {/* Quick Add TP Inline Input */}
+                          <div className="flex items-center gap-1 pt-1">
+                            <input
+                              type="text"
+                              placeholder="Tambah butir TP hasil analisa baru..."
+                              value={newTPInputs[item.id] || ''}
+                              onChange={(e) => setNewTPInputs(prev => ({ ...prev, [item.id]: e.target.value }))}
+                              onKeyDown={(e) => {
+                                if (e.key === 'Enter') {
+                                  e.preventDefault();
+                                  handleAddTP(item.id, item.semester);
+                                }
+                              }}
+                              className="flex-1 px-2.5 py-1.5 bg-white border border-emerald-200 rounded-lg text-[11px] placeholder:text-slate-400 focus:outline-none focus:ring-1 focus:ring-emerald-500"
+                            />
+                            <button
+                              type="button"
+                              onClick={() => handleAddTP(item.id, item.semester)}
+                              className="px-2.5 py-1.5 bg-emerald-700 hover:bg-emerald-600 text-white rounded-lg text-[11px] font-bold flex items-center gap-1 transition-colors shrink-0"
+                            >
+                              <Plus className="w-3 h-3" />
+                              <span>TP</span>
+                            </button>
+                          </div>
+                        </div>
                       </td>
 
                       {/* KOLOM KANAN: Materi Esensial */}
@@ -703,6 +1023,15 @@ export const CPMappingView: React.FC<CPMappingViewProps> = ({
           </div>
         </div>
       )}
+
+      {/* Modal Sinkronisasi Supabase */}
+      <SupabaseSyncModal
+        isOpen={showSupabaseModal}
+        onClose={() => setShowSupabaseModal(false)}
+        grade={grade}
+        currentCPData={cpData}
+        onApplyData={handleApplySupabaseData}
+      />
     </div>
   );
 };

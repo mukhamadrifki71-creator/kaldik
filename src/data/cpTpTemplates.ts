@@ -1,5 +1,5 @@
-import { PAIElement, ProtaItem, CPMappingEntry, SemesterType } from '../types';
-import { PAI_CURRICULUM_DATABASE } from './paiCurriculum';
+import type { PAIElement, ProtaItem, CPMappingEntry, SemesterType } from '../types/index.ts';
+import { PAI_CURRICULUM_DATABASE } from './paiCurriculum.ts';
 
 export interface ElementCP {
   element: PAIElement;

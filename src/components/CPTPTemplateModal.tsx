@@ -1,7 +1,9 @@
 import React, { useState, useEffect } from 'react';
-import { SchoolProfile, ProtaItem, PAIElement, DayOfWeek } from '../types';
+import { SchoolProfile, ProtaItem, PAIElement, DayOfWeek, CPMappingEntry } from '../types';
 import { CP_TP_TEMPLATES, FASE_CP_DATABASE, getGradeFase } from '../data/cpTpTemplates';
 import { PAI_CURRICULUM_DATABASE } from '../data/paiCurriculum';
+import { loadSavedCPMapping, saveCPMapping } from '../utils/kaldikStorage';
+import { CPMappingView } from './CPMappingView';
 import { 
   X, 
   Sparkles, 
@@ -21,7 +23,8 @@ import {
   HelpCircle,
   FileCheck,
   Download,
-  Upload
+  Upload,
+  Columns
 } from 'lucide-react';
 
 interface CPTPTemplateModalProps {
@@ -58,8 +61,20 @@ export const CPTPTemplateModal: React.FC<CPTPTemplateModalProps> = ({
   onApplyCurriculum
 }) => {
   const [selectedGrade, setSelectedGrade] = useState<number>(profile.selectedGrade || 4);
-  const [activeTab, setActiveTab] = useState<'editor' | 'cp_matrix'>('editor');
+  const [activeTab, setActiveTab] = useState<'cp_2_columns' | 'editor' | 'cp_matrix'>('cp_2_columns');
   const [selectedElement, setSelectedElement] = useState<PAIElement | 'all'>('all');
+
+  // 2-Column CP & Materi Esensial mapping state per grade
+  const [modalCPData, setModalCPData] = useState(() => loadSavedCPMapping(profile.selectedGrade || 4));
+
+  useEffect(() => {
+    setModalCPData(loadSavedCPMapping(selectedGrade));
+  }, [selectedGrade]);
+
+  const handleUpdateModalCPData = (data: { sem1: CPMappingEntry[]; sem2: CPMappingEntry[] }) => {
+    setModalCPData(data);
+    saveCPMapping(selectedGrade, data);
+  };
   
   // Custom edited templates stored by grade
   const [customChaptersByGrade, setCustomChaptersByGrade] = useState<Record<number, EditableChapter[]>>(() => {
@@ -314,9 +329,18 @@ export const CPTPTemplateModal: React.FC<CPTPTemplateModalProps> = ({
             {/* View Switcher Tabs */}
             <div className="flex items-center bg-white p-0.5 rounded-lg border border-slate-300">
               <button
+                onClick={() => setActiveTab('cp_2_columns')}
+                className={`px-3 py-1 text-xs font-bold rounded-md transition-colors flex items-center gap-1.5 ${
+                  activeTab === 'cp_2_columns' ? 'bg-emerald-700 text-white shadow-xs' : 'text-slate-600 hover:text-slate-900'
+                }`}
+              >
+                <Columns className="w-3.5 h-3.5" />
+                <span>Format 2 Kolom (CP & Materi Per Semester)</span>
+              </button>
+              <button
                 onClick={() => setActiveTab('editor')}
                 className={`px-3 py-1 text-xs font-bold rounded-md transition-colors flex items-center gap-1.5 ${
-                  activeTab === 'editor' ? 'bg-emerald-700 text-white' : 'text-slate-600 hover:text-slate-900'
+                  activeTab === 'editor' ? 'bg-emerald-700 text-white shadow-xs' : 'text-slate-600 hover:text-slate-900'
                 }`}
               >
                 <Edit3 className="w-3.5 h-3.5" />
@@ -325,7 +349,7 @@ export const CPTPTemplateModal: React.FC<CPTPTemplateModalProps> = ({
               <button
                 onClick={() => setActiveTab('cp_matrix')}
                 className={`px-3 py-1 text-xs font-bold rounded-md transition-colors flex items-center gap-1.5 ${
-                  activeTab === 'cp_matrix' ? 'bg-emerald-700 text-white' : 'text-slate-600 hover:text-slate-900'
+                  activeTab === 'cp_matrix' ? 'bg-emerald-700 text-white shadow-xs' : 'text-slate-600 hover:text-slate-900'
                 }`}
               >
                 <BookOpen className="w-3.5 h-3.5" />
@@ -355,8 +379,21 @@ export const CPTPTemplateModal: React.FC<CPTPTemplateModalProps> = ({
 
         {/* Body Area */}
         <div className="flex-1 overflow-y-auto p-6 space-y-6">
-          {/* Summary Stat & Guidance Bar */}
-          <div className="p-4 bg-emerald-50/70 rounded-2xl border border-emerald-200 flex flex-col md:flex-row items-start md:items-center justify-between gap-3">
+          {/* TAB 1: FORMAT 2 KOLOM (CP & MATERI ESENSIAL PER SEMESTER) */}
+          {activeTab === 'cp_2_columns' && (
+            <CPMappingView
+              grade={selectedGrade}
+              profile={profile}
+              cpData={modalCPData}
+              onUpdateCPData={handleUpdateModalCPData}
+            />
+          )}
+
+          {/* TAB 2: EDITOR BAB & TP */}
+          {activeTab === 'editor' && (
+            <>
+              {/* Summary Stat & Guidance Bar */}
+              <div className="p-4 bg-emerald-50/70 rounded-2xl border border-emerald-200 flex flex-col md:flex-row items-start md:items-center justify-between gap-3">
             <div>
               <div className="flex items-center gap-2">
                 <span className="text-xs font-bold text-emerald-900 uppercase tracking-wide flex items-center gap-1.5">
@@ -546,9 +583,8 @@ export const CPTPTemplateModal: React.FC<CPTPTemplateModalProps> = ({
             ))}
           </div>
 
-          {/* TAB 1: CHAPTER & TP EDITOR */}
-          {activeTab === 'editor' && (
-            <div className="space-y-4">
+          {/* Daftar Bab & TP */}
+          <div className="space-y-4">
               {filteredChapters.map((chapter, idx) => {
                 const isEditing = editingChapterId === chapter.id;
                 const badge = ELEMENT_BADGES[chapter.element] || ELEMENT_BADGES["Al-Qur'an Hadis"];
@@ -606,7 +642,6 @@ export const CPTPTemplateModal: React.FC<CPTPTemplateModalProps> = ({
                     {/* Chapter Body View / Edit */}
                     <div className="p-4 space-y-3">
                       {isEditing ? (
-                        /* Edit Mode */
                         <div className="space-y-3">
                           <div className="grid grid-cols-1 sm:grid-cols-5 gap-3 text-xs">
                             <div className="sm:col-span-2">
@@ -710,7 +745,6 @@ export const CPTPTemplateModal: React.FC<CPTPTemplateModalProps> = ({
                           </div>
                         </div>
                       ) : (
-                        /* Read-Only Display Mode */
                         <div>
                           <h4 className="font-bold text-slate-900 text-sm mb-1.5 flex items-center gap-2">
                             <span>{chapter.chapterTitle}</span>
@@ -735,9 +769,10 @@ export const CPTPTemplateModal: React.FC<CPTPTemplateModalProps> = ({
                 );
               })}
             </div>
-          )}
+          </>
+        )}
 
-          {/* TAB 2: CAPAIAN PEMBELAJARAN (CP) MATRIX VIEW & EDIT */}
+          {/* TAB 3: CAPAIAN PEMBELAJARAN (CP) MATRIX VIEW & EDIT */}
           {activeTab === 'cp_matrix' && (
             <div className="space-y-6">
               {/* Deskripsi Fase Banner */}
