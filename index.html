@@ -3,6 +3,16 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <link rel="icon" type="image/svg+xml" href="./favicon.svg" />
+    <link rel="alternate icon" type="image/x-icon" href="./favicon.ico" />
+    <script>
+      (function() {
+        var p = window.location.pathname;
+        if (p.length > 1 && !p.endsWith('/') && !p.split('/').pop().includes('.')) {
+          window.location.replace(p + '/' + window.location.search + window.location.hash);
+        }
+      })();
+    </script>
     <title>KaldikPAI - Analisis Kalender Pendidikan & Generator RPE Prota Promes</title>
     <meta name="description" content="Aplikasi analisis kalender pendidikan dan integrasi jadwal kegiatan sekolah dengan target kurikulum otomatis (RPE, Prota, Promes) untuk Guru PAI SDN Pohjentrek II Kota Pasuruan." />
     <meta property="og:title" content="KaldikPAI - Analisis Kalender Pendidikan & Generator RPE Prota Promes" />

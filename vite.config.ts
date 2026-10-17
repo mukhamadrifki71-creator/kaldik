@@ -1,11 +1,40 @@
 import tailwindcss from '@tailwindcss/vite';
 import react from '@vitejs/plugin-react';
 import path from 'path';
+import fs from 'fs';
 import { defineConfig, Plugin } from 'vite';
 import dotenv from 'dotenv';
 import { analyzeKaldikHandler, curriculumAssistantHandler } from './src/server/kaldikAnalyzer';
 
 dotenv.config();
+
+function copy404Plugin(): Plugin {
+  return {
+    name: 'kaldik-copy-404-plugin',
+    closeBundle() {
+      const distDir = path.resolve(__dirname, 'dist');
+      const docsDir = path.resolve(__dirname, 'docs');
+      const distIndex = path.resolve(distDir, 'index.html');
+      const dist404 = path.resolve(distDir, '404.html');
+
+      if (fs.existsSync(distIndex)) {
+        fs.copyFileSync(distIndex, dist404);
+        console.log('✓ Successfully created dist/404.html for GitHub Pages fallback');
+      }
+
+      // Sync dist to docs folder for users deploying via GitHub Pages "Deploy from a branch -> /docs"
+      try {
+        if (!fs.existsSync(docsDir)) {
+          fs.mkdirSync(docsDir, { recursive: true });
+        }
+        fs.cpSync(distDir, docsDir, { recursive: true, force: true });
+        console.log('✓ Successfully synced dist/ to docs/ for GitHub Pages branch deployment');
+      } catch (e) {
+        console.warn('Note: could not copy to docs folder:', e);
+      }
+    }
+  };
+}
 
 function apiPlugin(): Plugin {
   return {
@@ -58,7 +87,8 @@ function apiPlugin(): Plugin {
 
 export default defineConfig(() => {
   return {
-    plugins: [react(), tailwindcss(), apiPlugin()],
+    base: './',
+    plugins: [react(), tailwindcss(), apiPlugin(), copy404Plugin()],
     resolve: {
       alias: {
         '@': path.resolve(__dirname, '.'),
