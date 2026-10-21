@@ -737,7 +737,7 @@ export const SupabaseSyncModal: React.FC<SupabaseSyncModalProps> = ({
                   </div>
                   <input
                     type="text"
-                    placeholder="tujuan_pembelajaran"
+                    placeholder="tp_hasil_analisis"
                     value={config.tableName}
                     onChange={(e) => setConfig({ ...config, tableName: e.target.value.trim() })}
                     className="w-full px-3.5 py-2.5 bg-white border border-slate-300 rounded-xl font-mono text-xs font-bold text-emerald-950 focus:ring-2 focus:ring-emerald-500 focus:outline-none mb-2"
