@@ -387,6 +387,7 @@ export const ProtaView: React.FC<ProtaViewProps> = ({
           profile={profile}
           cpData={cpData}
           onUpdateCPData={onUpdateCPData}
+          onSyncToProta={onUpdateProtaItems}
           onOpenPrint={onOpenPrint}
           currentSemester={currentSemester}
         />

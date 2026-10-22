@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
 import type { CPMappingEntry, SchoolProfile, SemesterType, PAIElement, ProtaItem } from '../types/index.ts';
 import { generateStandardCPMapping } from '../data/cpTpTemplates';
-import { getSupabaseConfig, getStandard84AnalyzedTP, applySupabaseTPToCPMapping } from '../services/supabaseService';
+import { getSupabaseConfig, getStandard84AnalyzedTP, applySupabaseTPToCPMapping, fetchTPFromSupabase } from '../services/supabaseService';
 import { SupabaseSyncModal } from './SupabaseSyncModal';
 import { 
   BookOpen, 
@@ -26,7 +26,8 @@ import {
   RefreshCw,
   X,
   ShieldCheck,
-  ListOrdered
+  ListOrdered,
+  Lock
 } from 'lucide-react';
 
 interface CPMappingViewProps {
@@ -64,6 +65,7 @@ export const CPMappingView: React.FC<CPMappingViewProps> = ({
   const [showAddElementModal, setShowAddElementModal] = useState<boolean>(false);
   const [showSupabaseModal, setShowSupabaseModal] = useState<boolean>(false);
   const [supabaseNotification, setSupabaseNotification] = useState<string | null>(null);
+  const [isDirectSyncing, setIsDirectSyncing] = useState<boolean>(false);
   const [newElementSemester, setNewElementSemester] = useState<SemesterType>(1);
   const [newElementName, setNewElementName] = useState<PAIElement>("Al-Qur'an Hadis");
   const [newElementCP, setNewElementCP] = useState<string>('');
@@ -78,12 +80,42 @@ export const CPMappingView: React.FC<CPMappingViewProps> = ({
   const totalTPCount = sem1TPCount + sem2TPCount;
   const is84Exact = totalTPCount === 84;
 
+  // Direct pull from Supabase using locked credentials
+  const handleDirectFetchFromSupabase = async () => {
+    if (!isSupabaseConfigured) {
+      setShowSupabaseModal(true);
+      return;
+    }
+    setIsDirectSyncing(true);
+    try {
+      const res = await fetchTPFromSupabase(grade, supabaseConfig, { forceAll84Mode: true });
+      if (res.success && res.data) {
+        const updated = applySupabaseTPToCPMapping(cpData, res.data, {
+          updateMaterials: true,
+          updateCPDescription: true
+        });
+        onUpdateCPData(updated);
+        setSupabaseNotification(`Berhasil menarik Elemen CP, Materi Esensial, dan ${res.data.totalTP} butir TP Hasil Analisis langsung dari Supabase (${supabaseConfig.tableName})!`);
+      } else {
+        setSupabaseNotification(`Pemberitahuan: ${res.message}. Membuka pengaturan Supabase.`);
+        setShowSupabaseModal(true);
+      }
+    } catch (err: any) {
+      setSupabaseNotification(`Galat Supabase: ${err.message || String(err)}`);
+    } finally {
+      setIsDirectSyncing(false);
+      setTimeout(() => {
+        setSupabaseNotification(null);
+      }, 6000);
+    }
+  };
+
   // Direct load 84 analyzed TP
   const handleLoad84TPDirectly = () => {
     const std = getStandard84AnalyzedTP();
-    const updated = applySupabaseTPToCPMapping(cpData, std, { updateMaterials: true });
+    const updated = applySupabaseTPToCPMapping(cpData, std, { updateMaterials: true, updateCPDescription: true });
     onUpdateCPData(updated);
-    setSupabaseNotification('Berhasil menerapkan 84 Butir Tujuan Pembelajaran Hasil Analisis secara presisi (42 butir Sem 1, 42 butir Sem 2)!');
+    setSupabaseNotification('Berhasil menerapkan Elemen CP, Materi Esensial, dan 84 Butir Tujuan Pembelajaran Hasil Analisis secara presisi (42 butir Sem 1, 42 butir Sem 2)!');
     setTimeout(() => {
       setSupabaseNotification(null);
     }, 5000);
@@ -237,7 +269,8 @@ export const CPMappingView: React.FC<CPMappingViewProps> = ({
     });
 
     onSyncToProta(protaItemsToSync);
-    alert(`Berhasil menyinkronkan ${protaItemsToSync.length} bab Prota beserta Tujuan Pembelajaran hasil analisa!`);
+    setSupabaseNotification(`Berhasil menyinkronkan ${protaItemsToSync.length} bab Prota beserta Tujuan Pembelajaran hasil analisa!`);
+    setTimeout(() => setSupabaseNotification(null), 5000);
   };
 
   // Delete an entire entry
@@ -461,16 +494,35 @@ export const CPMappingView: React.FC<CPMappingViewProps> = ({
         </div>
 
         <div className="flex items-center gap-2 flex-wrap">
+          {isSupabaseConfigured && (
+            <button
+              onClick={handleDirectFetchFromSupabase}
+              disabled={isDirectSyncing}
+              className="px-3.5 py-2 bg-emerald-800 hover:bg-emerald-700 disabled:opacity-60 text-white rounded-xl text-xs font-bold transition-all flex items-center gap-1.5 shadow-sm border border-emerald-600/70"
+              title={`Tarik langsung dari database Supabase "${supabaseConfig.tableName}" menggunakan kredensial tersimpan`}
+            >
+              <RefreshCw className={`w-3.5 h-3.5 text-emerald-300 ${isDirectSyncing ? 'animate-spin' : ''}`} />
+              <span>{isDirectSyncing ? 'Menarik...' : 'Tarik Langsung Supabase'}</span>
+              {supabaseConfig.isLocked && (
+                <span title="Kredensial Supabase Terkunci">
+                  <Lock className="w-3 h-3 text-emerald-300" />
+                </span>
+              )}
+            </button>
+          )}
+
           <button
             onClick={() => setShowSupabaseModal(true)}
-            className="px-3.5 py-2 bg-emerald-800 hover:bg-emerald-700 text-white rounded-xl text-xs font-bold transition-all flex items-center gap-1.5 shadow-sm border border-emerald-600/60"
-            title="Ambil Tujuan Pembelajaran (TP) Hasil Analisis langsung dari database Supabase Anda"
+            className="px-3.5 py-2 bg-slate-800 hover:bg-slate-700 text-white rounded-xl text-xs font-bold transition-all flex items-center gap-1.5 shadow-sm border border-slate-700"
+            title="Buka panel integrasi Supabase (Pengaturan, Pemetaan Kolom, & Tempel Data)"
           >
-            <Database className="w-3.5 h-3.5 text-emerald-300" />
-            <span>Tarik dari Supabase</span>
-            <span className="text-[10px] bg-emerald-700/80 text-emerald-200 px-1.5 py-0.2 rounded font-extrabold border border-emerald-500/50">
-              84 TP
-            </span>
+            <Database className="w-3.5 h-3.5 text-emerald-400" />
+            <span>Pengaturan Supabase</span>
+            {supabaseConfig.isLocked && isSupabaseConfigured && (
+              <span className="text-[10px] bg-emerald-900/90 text-emerald-300 px-1.5 py-0.2 rounded font-extrabold flex items-center gap-0.5 border border-emerald-500/40">
+                <Lock className="w-2.5 h-2.5" /> Terkunci
+              </span>
+            )}
           </button>
 
           <button
@@ -553,20 +605,34 @@ export const CPMappingView: React.FC<CPMappingViewProps> = ({
 
       {/* Supabase Status Chip if configured */}
       {isSupabaseConfigured && !supabaseNotification && (
-        <div className="px-4 py-2 bg-emerald-950 text-emerald-100 rounded-xl flex items-center justify-between text-xs border border-emerald-900 shadow-2xs">
-          <div className="flex items-center gap-2">
+        <div className="px-4 py-2 bg-emerald-950 text-emerald-100 rounded-xl flex items-center justify-between text-xs border border-emerald-900 shadow-2xs flex-wrap gap-2">
+          <div className="flex items-center gap-2 flex-wrap">
             <Database className="w-3.5 h-3.5 text-emerald-400" />
-            <span>Sumber TP: <strong>Database Supabase</strong> ({supabaseConfig.tableName})</span>
+            <span>Sumber Data: <strong>Database Supabase</strong> ({supabaseConfig.tableName})</span>
             <span className="w-1.5 h-1.5 rounded-full bg-emerald-400"></span>
-            <span className="text-emerald-300/80 text-[11px]">Tujuan Pembelajaran siap disinkronkan</span>
+            {supabaseConfig.isLocked && (
+              <span className="px-2 py-0.5 rounded-md bg-emerald-900 text-emerald-300 border border-emerald-700/60 font-semibold flex items-center gap-1 text-[10px]">
+                <Lock className="w-2.5 h-2.5" /> Kredensial Terkunci Permanen
+              </span>
+            )}
+            <span className="text-emerald-300/80 text-[11px]">Elemen CP, Materi Esensial, & TP tersinkron</span>
           </div>
-          <button
-            onClick={() => setShowSupabaseModal(true)}
-            className="text-emerald-300 hover:text-white underline font-semibold flex items-center gap-1 text-[11px]"
-          >
-            <RefreshCw className="w-3 h-3" />
-            <span>Tarik Ulang / Atur Tabel</span>
-          </button>
+          <div className="flex items-center gap-2">
+            <button
+              onClick={handleDirectFetchFromSupabase}
+              disabled={isDirectSyncing}
+              className="px-2.5 py-1 bg-emerald-800 hover:bg-emerald-700 text-white rounded-lg font-bold flex items-center gap-1 text-[11px] border border-emerald-700"
+            >
+              <RefreshCw className={`w-3 h-3 ${isDirectSyncing ? 'animate-spin' : ''}`} />
+              <span>{isDirectSyncing ? 'Menarik...' : 'Tarik Ulang'}</span>
+            </button>
+            <button
+              onClick={() => setShowSupabaseModal(true)}
+              className="text-emerald-300 hover:text-white underline font-semibold flex items-center gap-1 text-[11px]"
+            >
+              <span>Atur Kolom</span>
+            </button>
+          </div>
         </div>
       )}
 

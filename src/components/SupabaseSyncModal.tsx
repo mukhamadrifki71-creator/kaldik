@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import { 
   Database, 
   X, 
@@ -19,16 +19,23 @@ import {
   ShieldCheck,
   Ban,
   ListOrdered,
-  Sparkles
+  Sparkles,
+  FileText,
+  ClipboardPaste,
+  Lock,
+  Unlock
 } from 'lucide-react';
 import { 
   getSupabaseConfig, 
   saveSupabaseConfig, 
+  setSupabaseLockedState,
   testSupabaseConnection, 
   fetchTPFromSupabase, 
   getStandard84AnalyzedTP,
   applySupabaseTPToCPMapping,
   detectTableColumns,
+  processRawRecordsToResult,
+  parseSupabaseDataFromText,
   SupabaseConfig,
   FetchedTPResult
 } from '../services/supabaseService';
@@ -58,7 +65,7 @@ export const SupabaseSyncModal: React.FC<SupabaseSyncModalProps> = ({
   currentCPData,
   onApplyData
 }) => {
-  const [activeTab, setActiveTab] = useState<'fetch' | 'config' | 'table84'>('fetch');
+  const [activeTab, setActiveTab] = useState<'fetch' | 'import_paste' | 'config' | 'table84'>('fetch');
   
   // Configuration state
   const [config, setConfig] = useState<SupabaseConfig>(getSupabaseConfig);
@@ -87,12 +94,41 @@ export const SupabaseSyncModal: React.FC<SupabaseSyncModalProps> = ({
     data?: FetchedTPResult;
   } | null>(null);
 
-  // Application options
+  // Direct paste import state
+  const [pastedText, setPastedText] = useState('');
+  const [pasteError, setPasteError] = useState<string | null>(null);
+
+  // Application options - default both to true so CP Elements, CP Descriptions, and Materials are pulled and aligned automatically
   const [updateMaterials, setUpdateMaterials] = useState(true);
-  const [updateCPDescription, setUpdateCPDescription] = useState(false);
+  const [updateCPDescription, setUpdateCPDescription] = useState(true);
   const [selectedPreviewSem, setSelectedPreviewSem] = useState<1 | 2>(1);
   const [appliedSuccess, setAppliedSuccess] = useState(false);
   const [searchFilter, setSearchFilter] = useState('');
+
+  const handleToggleLock = () => {
+    const nextLocked = !config.isLocked;
+    const updated = setSupabaseLockedState(nextLocked);
+    setConfig(updated);
+  };
+
+  // Collect all real column names detected from database sample or fetched records
+  const detectedColumns = useMemo(() => {
+    if (testResult?.sampleColumns && testResult.sampleColumns.length > 0) {
+      return testResult.sampleColumns;
+    }
+    if (fetchResult?.data?.records && fetchResult.data.records.length > 0) {
+      return Object.keys(fetchResult.data.records[0]);
+    }
+    return [
+      'tujuan_pembelajaran_hasil_analisis',
+      'tp_hasil_analisis',
+      'tujuan_pembelajaran',
+      'elemen',
+      'semester',
+      'kelas',
+      'materi_esensial'
+    ];
+  }, [testResult, fetchResult]);
 
   useEffect(() => {
     if (isOpen) {
@@ -151,6 +187,31 @@ export const SupabaseSyncModal: React.FC<SupabaseSyncModalProps> = ({
   const handleSaveConfig = () => {
     saveSupabaseConfig(config);
     handleTestConnection();
+  };
+
+  const handleChangeTPColumn = (newCol: string) => {
+    const updated = { ...config, tpColumn: newCol };
+    setConfig(updated);
+    saveSupabaseConfig(updated);
+    if (fetchResult?.data?.records && fetchResult.data.records.length > 0) {
+      const reprocessed = processRawRecordsToResult(fetchResult.data.records, updated, fetchResult.data.sourceTable);
+      setFetchResult({
+        success: true,
+        message: `Berhasil memilih kolom "${newCol}" sebagai Tujuan Pembelajaran Hasil Analisis (${reprocessed.totalTP} butir TP).`,
+        data: reprocessed
+      });
+    }
+  };
+
+  const handleParseAndApplyPaste = () => {
+    setPasteError(null);
+    const parsed = parseSupabaseDataFromText(pastedText, config);
+    if (parsed.success && parsed.data) {
+      setFetchResult(parsed);
+      setActiveTab('fetch');
+    } else {
+      setPasteError(parsed.message || 'Gagal memproses data teks. Pastikan format tabel memiliki judul kolom atau berformat JSON array.');
+    }
   };
 
   const handleFetchData = async (cfgToUse = config) => {
@@ -246,9 +307,22 @@ export const SupabaseSyncModal: React.FC<SupabaseSyncModalProps> = ({
                 }`}>
                   {isConnected ? 'Supabase Terhubung' : 'Mode Offline / Kredensial Kosong'}
                 </span>
+                {config.isLocked ? (
+                  <span className="text-[10px] font-bold px-2.5 py-0.5 rounded-full bg-emerald-500/30 text-emerald-200 border border-emerald-400/50 flex items-center gap-1 shadow-2xs">
+                    <Lock className="w-3 h-3 text-emerald-300" />
+                    Kredensial Terkunci Permanen
+                  </span>
+                ) : (
+                  <span className="text-[10px] font-bold px-2.5 py-0.5 rounded-full bg-amber-500/30 text-amber-200 border border-amber-400/50 flex items-center gap-1 shadow-2xs">
+                    <Unlock className="w-3 h-3 text-amber-300" />
+                    Kredensial Terbuka
+                  </span>
+                )}
               </div>
               <p className="text-xs text-emerald-200/90 mt-0.5 flex items-center gap-1.5 flex-wrap">
-                <span>Menginput kolom: <strong>tujuan pembelajaran hasil analisis</strong></span>
+                <span>Kolom TP: <strong>{fetchResult?.data?.activeColumnUsed || config.tpColumn}</strong></span>
+                <span className="text-emerald-400">•</span>
+                <span>Elemen CP & Materi Esensial: <strong>Ditarik dari Supabase</strong></span>
                 <span className="text-emerald-400">•</span>
                 <span className="text-rose-200 font-semibold bg-rose-950/60 px-1.5 py-0.2 rounded border border-rose-800/50">
                   Kolom Sementara: Diabaikan
@@ -304,6 +378,18 @@ export const SupabaseSyncModal: React.FC<SupabaseSyncModalProps> = ({
             </button>
 
             <button
+              onClick={() => setActiveTab('import_paste')}
+              className={`px-4 py-2.5 text-xs font-bold border-b-2 flex items-center gap-2 transition-colors whitespace-nowrap ${
+                activeTab === 'import_paste'
+                  ? 'border-emerald-700 text-emerald-800 bg-white rounded-t-lg shadow-2xs'
+                  : 'border-transparent text-slate-500 hover:text-slate-800'
+              }`}
+            >
+              <ClipboardPaste className="w-3.5 h-3.5" />
+              <span>Tempel / Impor Data Supabase</span>
+            </button>
+
+            <button
               onClick={() => setActiveTab('config')}
               className={`px-4 py-2.5 text-xs font-bold border-b-2 flex items-center gap-2 transition-colors whitespace-nowrap ${
                 activeTab === 'config'
@@ -347,25 +433,39 @@ export const SupabaseSyncModal: React.FC<SupabaseSyncModalProps> = ({
                     <span className="text-xs font-bold px-2.5 py-0.5 rounded-full bg-emerald-600 text-white">
                       {isExact84 ? '84/84 Presisi 100%' : `${totalCount} Butir TP`}
                     </span>
+                    <span className="text-[11px] font-bold px-2 py-0.5 rounded-full bg-blue-100 text-blue-800 border border-blue-200">
+                      TP Tambahan: 0 Butir (Eksklusif Supabase)
+                    </span>
                   </div>
 
-                  <div className="text-xs text-slate-600 space-y-1">
-                    <p className="flex items-center gap-2 flex-wrap">
-                      <span className="text-emerald-800 font-bold flex items-center gap-1">
+                  <div className="text-xs text-slate-600 space-y-2">
+                    <div className="flex items-center gap-2 flex-wrap">
+                      <span className="text-emerald-900 font-bold flex items-center gap-1">
                         <CheckCircle2 className="w-3.5 h-3.5 text-emerald-600" />
-                        Kolom Digunakan:
+                        Pilih Kolom TP Hasil Analisis:
                       </span>
-                      <code className="bg-white px-2 py-0.5 rounded border border-emerald-300 font-mono text-emerald-900 font-bold">
-                        {fetchResult?.data?.activeColumnUsed || config.tpColumn || 'tujuan_pembelajaran_hasil_analisis'}
-                      </code>
+                      <select
+                        value={fetchResult?.data?.activeColumnUsed || config.tpColumn}
+                        onChange={(e) => handleChangeTPColumn(e.target.value)}
+                        className="px-2.5 py-1 text-xs font-mono font-bold bg-white text-emerald-950 border border-emerald-400 rounded-lg focus:outline-none focus:ring-2 focus:ring-emerald-500 shadow-2xs cursor-pointer"
+                      >
+                        {detectedColumns.map(col => (
+                          <option key={col} value={col}>
+                            {col} {col.toLowerCase().includes('sementara') ? '(Peringatan: Kolom Sementara)' : ''}
+                          </option>
+                        ))}
+                      </select>
                       <span className="text-slate-400">|</span>
                       <span className="text-rose-700 font-bold flex items-center gap-1">
                         <Ban className="w-3.5 h-3.5 text-rose-600" />
-                        Kolom Diabaikan:
+                        Kolom Sementara (Diabaikan):
                       </span>
                       <code className="bg-white px-2 py-0.5 rounded border border-rose-300 font-mono text-rose-800 line-through">
                         {fetchResult?.data?.ignoredTemporaryColumn || 'tujuan_pembelajaran_sementara'}
                       </code>
+                    </div>
+                    <p className="text-[11px] text-slate-600">
+                      Tujuan pembelajaran yang ditarik ini akan <strong>menggantikan sepenuhnya</strong> TP yang ada di aplikasi tanpa menambahkan TP dummy/tambahan lainnya.
                     </p>
                     <p className="text-[11px] text-slate-500">
                       Tepat <strong>84 butir</strong> tujuan pembelajaran hasil analisis didistribusikan ke 5 elemen PAI (42 butir Semester 1, 42 butir Semester 2).
@@ -472,24 +572,53 @@ export const SupabaseSyncModal: React.FC<SupabaseSyncModalProps> = ({
                     {Object.entries(fetchResult.data.groupedByElement).map(([elementName, semDataRaw]) => {
                       const semData = semDataRaw as { sem1: string[]; sem2: string[] };
                       const tpList = (selectedPreviewSem === 1 ? semData.sem1 : semData.sem2) || [];
+                      const semKey = selectedPreviewSem === 1 ? 'sem1' : 'sem2';
+                      const materialsList = fetchResult.data?.materialsByElement?.[elementName]?.[semKey] || [];
+                      const cpDesc = fetchResult.data?.cpByElement?.[elementName]?.[semKey];
+
                       return (
-                        <div key={elementName} className="p-3.5 bg-white rounded-xl border border-slate-200 hover:border-emerald-300 transition-colors shadow-2xs">
-                          <div className="flex items-center justify-between mb-2">
+                        <div key={elementName} className="p-3.5 bg-white rounded-xl border border-slate-200 hover:border-emerald-300 transition-colors shadow-2xs space-y-2">
+                          <div className="flex items-center justify-between">
                             <span className="font-bold text-xs text-emerald-950 flex items-center gap-1.5">
                               <span className="w-2.5 h-2.5 rounded-full bg-emerald-600"></span>
-                              Elemen: {elementName}
+                              Elemen: <strong>{elementName}</strong>
                             </span>
-                            <span className="text-[10px] font-extrabold px-2 py-0.5 rounded-full bg-emerald-100 text-emerald-800 border border-emerald-200">
-                              {tpList.length} Butir TP Hasil Analisis
-                            </span>
+                            <div className="flex items-center gap-1.5">
+                              <span className="text-[10px] font-extrabold px-2 py-0.5 rounded-full bg-emerald-100 text-emerald-800 border border-emerald-200">
+                                {tpList.length} Butir TP Hasil Analisis
+                              </span>
+                              <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-teal-100 text-teal-800 border border-teal-200">
+                                {materialsList.length} Materi Esensial
+                              </span>
+                            </div>
                           </div>
+
+                          {/* CP Description from Supabase */}
+                          {cpDesc && (
+                            <div className="p-2 bg-emerald-50/70 rounded-lg border border-emerald-100 text-[11px] text-emerald-950">
+                              <span className="font-bold text-emerald-900 block mb-0.5">Capaian Pembelajaran (CP) Elemen:</span>
+                              <p className="line-clamp-2 leading-relaxed italic">"{cpDesc}"</p>
+                            </div>
+                          )}
+
+                          {/* Aligned Essential Materials */}
+                          {materialsList.length > 0 && (
+                            <div className="flex items-center gap-1.5 flex-wrap text-[11px] pt-1">
+                              <span className="font-semibold text-slate-500">Materi Esensial Terkait TP:</span>
+                              {materialsList.map((m, mIdx) => (
+                                <span key={mIdx} className="px-2 py-0.5 bg-slate-100 text-slate-800 rounded-md border border-slate-200 font-medium">
+                                  {m}
+                                </span>
+                              ))}
+                            </div>
+                          )}
 
                           {tpList.length === 0 ? (
                             <p className="text-[11px] text-slate-400 italic">
                               Tidak ada butir TP untuk semester {selectedPreviewSem} pada elemen ini.
                             </p>
                           ) : (
-                            <ul className="space-y-1.5 pl-4 list-decimal text-xs text-slate-700 max-h-48 overflow-y-auto pr-2">
+                            <ul className="space-y-1.5 pl-4 list-decimal text-xs text-slate-700 max-h-40 overflow-y-auto pr-2 pt-1 border-t border-slate-100">
                               {tpList.map((tp, idx) => (
                                 <li key={idx} className="leading-relaxed hover:text-emerald-900">
                                   {tp}
@@ -675,6 +804,91 @@ export const SupabaseSyncModal: React.FC<SupabaseSyncModalProps> = ({
             </div>
           )}
 
+          {/* TAB: TEMPEL / IMPOR DATA SUPABASE (JSON / CSV) */}
+          {activeTab === 'import_paste' && (
+            <div className="space-y-6">
+              <div className="bg-emerald-50 p-4 rounded-xl border border-emerald-200 flex items-start gap-3">
+                <ClipboardPaste className="w-5 h-5 text-emerald-700 shrink-0 mt-0.5" />
+                <div className="text-xs space-y-1.5 text-slate-700">
+                  <p className="font-bold text-emerald-950">
+                    Tempel Data Ekspor Supabase (Solusi Paling Cepat & Langsung)
+                  </p>
+                  <p className="leading-relaxed">
+                    Jika koneksi API Supabase dibatasi (RLS / CORS) atau Anda ingin memuat data seketika, salin hasil ekspor dari <strong>Supabase Table Editor</strong> (berformat <strong>CSV, TSV (Copy as TSV), atau JSON array</strong>) lalu tempelkan di kotak bawah ini.
+                  </p>
+                  <p className="text-emerald-800 font-semibold">
+                    ✓ Kolom <code>tujuan_pembelajaran_hasil_analisis</code> akan diekstrak secara otomatis.
+                    <br />
+                    ✓ Kolom sementara (<code>tujuan_pembelajaran_sementara</code>) otomatis ditolak dan diabaikan.
+                    <br />
+                    ✓ Data ini akan menjadi <strong>satu-satunya TP</strong> di aplikasi (0 TP tambahan/dummy).
+                  </p>
+                </div>
+              </div>
+
+              {pasteError && (
+                <div className="p-3 bg-rose-50 border border-rose-200 rounded-xl text-rose-800 text-xs flex items-center gap-2">
+                  <AlertCircle className="w-4 h-4 text-rose-600 shrink-0" />
+                  <span>{pasteError}</span>
+                </div>
+              )}
+
+              <div className="space-y-2">
+                <div className="flex items-center justify-between">
+                  <label className="text-xs font-bold text-slate-800 flex items-center gap-1.5">
+                    <FileText className="w-3.5 h-3.5 text-emerald-700" />
+                    <span>Tempelkan Teks Data Supabase (JSON Array atau Baris CSV/TSV):</span>
+                  </label>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      const sampleJSON = JSON.stringify(
+                        getStandard84AnalyzedTP().records.slice(0, 3),
+                        null,
+                        2
+                      );
+                      setPastedText(sampleJSON);
+                    }}
+                    className="text-[11px] font-semibold text-emerald-700 hover:text-emerald-900 underline"
+                  >
+                    Contoh Format JSON
+                  </button>
+                </div>
+
+                <textarea
+                  value={pastedText}
+                  onChange={(e) => setPastedText(e.target.value)}
+                  placeholder={`Tempelkan data Supabase di sini...\nContoh JSON:\n[\n  {\n    "semester": 1,\n    "elemen": "Al-Qur'an Hadis",\n    "tujuan_pembelajaran_hasil_analisis": "Membaca surah Al-Falaq dengan tartil...",\n    "materi_esensial": "Q.S. Al-Falaq"\n  }\n]\n\nAtau Contoh CSV/TSV:\nsemester,elemen,tujuan_pembelajaran_hasil_analisis,materi_esensial\n1,Al-Qur'an Hadis,"Membaca Al-Falaq...","Q.S. Al-Falaq"`}
+                  rows={10}
+                  className="w-full p-3 font-mono text-xs bg-slate-50 border border-slate-300 rounded-xl focus:bg-white focus:ring-2 focus:ring-emerald-500 focus:outline-none leading-relaxed text-slate-800"
+                />
+              </div>
+
+              <div className="flex items-center justify-between gap-3 pt-2 border-t border-slate-200">
+                <button
+                  type="button"
+                  onClick={() => setPastedText('')}
+                  disabled={!pastedText}
+                  className="px-4 py-2 text-xs font-bold text-slate-600 hover:text-slate-800 disabled:opacity-40"
+                >
+                  Bersihkan Teks
+                </button>
+
+                <div className="flex items-center gap-2">
+                  <button
+                    type="button"
+                    onClick={handleParseAndApplyPaste}
+                    disabled={!pastedText.trim()}
+                    className="px-5 py-2.5 bg-emerald-700 hover:bg-emerald-600 disabled:bg-slate-300 text-white rounded-xl text-xs font-bold transition-all shadow-sm flex items-center gap-2"
+                  >
+                    <Check className="w-4 h-4" />
+                    <span>Proses & Muat Data ke Pratinjau</span>
+                  </button>
+                </div>
+              </div>
+            </div>
+          )}
+
           {/* TAB 3: CONFIGURATION / SETTINGS */}
           {activeTab === 'config' && (
             <div className="space-y-6">
@@ -691,32 +905,115 @@ export const SupabaseSyncModal: React.FC<SupabaseSyncModalProps> = ({
                 </div>
               </div>
 
+              {/* Locked State Card */}
+              <div className={`p-4 rounded-xl border flex flex-col sm:flex-row sm:items-center justify-between gap-3 ${
+                config.isLocked 
+                  ? 'bg-emerald-50 border-emerald-300 text-emerald-950 shadow-2xs' 
+                  : 'bg-amber-50 border-amber-300 text-amber-950'
+              }`}>
+                <div className="flex items-start gap-3">
+                  <div className={`p-2.5 rounded-xl ${config.isLocked ? 'bg-emerald-700 text-white shadow-xs' : 'bg-amber-600 text-white'}`}>
+                    {config.isLocked ? <Lock className="w-5 h-5" /> : <Unlock className="w-5 h-5" />}
+                  </div>
+                  <div className="text-xs space-y-1">
+                    <div className="flex items-center gap-2">
+                      <p className="font-extrabold text-sm text-emerald-950">
+                        {config.isLocked ? 'Kredensial Supabase Terkunci Permanen' : 'Mode Ubah Kredensial Terbuka'}
+                      </p>
+                      <span className={`text-[10px] font-black px-2 py-0.2 rounded-full uppercase tracking-wider ${
+                        config.isLocked ? 'bg-emerald-200 text-emerald-900' : 'bg-amber-200 text-amber-900'
+                      }`}>
+                        {config.isLocked ? 'TERKUNCI' : 'TERBUKA'}
+                      </span>
+                    </div>
+                    <p className="text-slate-600 leading-relaxed">
+                      {config.isLocked 
+                        ? 'Project URL dan API Key tersimpan dan terkunci aman di peramban ini. Anda tidak perlu memasukkannya ulang saat membuka atau memuat ulang halaman.' 
+                        : 'Anda sedang dalam mode edit. Klik tombol "Kunci Kredensial" setelah selesai mengisi agar tersimpan permanen dan terkunci.'}
+                    </p>
+                  </div>
+                </div>
+
+                <div className="flex items-center gap-2 shrink-0 self-end sm:self-center">
+                  <button
+                    type="button"
+                    onClick={handleToggleLock}
+                    className={`px-4 py-2 rounded-xl text-xs font-bold transition-all flex items-center gap-1.5 shadow-2xs ${
+                      config.isLocked 
+                        ? 'bg-white hover:bg-slate-100 text-emerald-900 border border-emerald-300' 
+                        : 'bg-emerald-700 hover:bg-emerald-800 text-white border border-emerald-800'
+                    }`}
+                  >
+                    {config.isLocked ? (
+                      <>
+                        <Unlock className="w-3.5 h-3.5 text-emerald-700" />
+                        <span>Buka Kunci untuk Edit</span>
+                      </>
+                    ) : (
+                      <>
+                        <Lock className="w-3.5 h-3.5" />
+                        <span>Kunci Kredensial Sekarang</span>
+                      </>
+                    )}
+                  </button>
+                </div>
+              </div>
+
               {/* Form Config */}
               <div className="space-y-4 text-xs">
                 <div>
-                  <label className="block font-bold text-slate-800 mb-1">
-                    Supabase Project URL <span className="text-rose-500">*</span>
-                  </label>
+                  <div className="flex items-center justify-between mb-1">
+                    <label className="font-bold text-slate-800 flex items-center gap-1.5">
+                      <span>Supabase Project URL</span>
+                      <span className="text-rose-500">*</span>
+                      {config.isLocked && (
+                        <span className="text-[10px] font-medium text-emerald-700 bg-emerald-100 px-1.5 py-0.2 rounded flex items-center gap-1">
+                          <Lock className="w-2.5 h-2.5" /> Terkunci
+                        </span>
+                      )}
+                    </label>
+                    {config.isLocked && (
+                      <span className="text-[11px] text-slate-400 italic">Buka kunci di atas jika ingin mengubah</span>
+                    )}
+                  </div>
                   <input
                     type="text"
                     placeholder="https://xxxxxxxxxxxxxxxxxxxx.supabase.co"
                     value={config.url}
+                    readOnly={config.isLocked}
                     onChange={(e) => setConfig({ ...config, url: e.target.value.trim() })}
-                    className="w-full px-3.5 py-2.5 bg-white border border-slate-300 rounded-xl font-mono text-xs focus:ring-2 focus:ring-emerald-500 focus:outline-none"
+                    className={`w-full px-3.5 py-2.5 border rounded-xl font-mono text-xs focus:ring-2 focus:ring-emerald-500 focus:outline-none transition-colors ${
+                      config.isLocked 
+                        ? 'bg-slate-100 border-slate-300 text-slate-700 cursor-not-allowed select-all' 
+                        : 'bg-white border-slate-300'
+                    }`}
                   />
                 </div>
 
                 <div>
-                  <label className="block font-bold text-slate-800 mb-1">
-                    Supabase Anon / Public Key <span className="text-rose-500">*</span>
-                  </label>
+                  <div className="flex items-center justify-between mb-1">
+                    <label className="font-bold text-slate-800 flex items-center gap-1.5">
+                      <span>Supabase Anon / Public Key</span>
+                      <span className="text-rose-500">*</span>
+                      {config.isLocked && (
+                        <span className="text-[10px] font-medium text-emerald-700 bg-emerald-100 px-1.5 py-0.2 rounded flex items-center gap-1">
+                          <Lock className="w-2.5 h-2.5" /> Terkunci
+                        </span>
+                      )}
+                    </label>
+                  </div>
                   <div className="relative">
                     <input
                       type={showKey ? 'text' : 'password'}
                       placeholder="eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9..."
                       value={config.anonKey}
+                      readOnly={config.isLocked}
                       onChange={(e) => setConfig({ ...config, anonKey: e.target.value.trim() })}
-                      className="w-full px-3.5 py-2.5 pr-10 bg-white border border-slate-300 rounded-xl font-mono text-xs focus:ring-2 focus:ring-emerald-500 focus:outline-none"
+                      className={`w-full px-3.5 py-2.5 pr-10 border rounded-xl font-mono text-xs focus:ring-2 focus:ring-emerald-500 focus:outline-none transition-colors ${
+                        config.isLocked 
+                          ? 'bg-slate-100 border-slate-300 text-slate-700 cursor-not-allowed select-all' 
+                          : 'bg-white border-slate-300'
+                      }`}
                     />
                     <button
                       type="button"
@@ -739,25 +1036,32 @@ export const SupabaseSyncModal: React.FC<SupabaseSyncModalProps> = ({
                     type="text"
                     placeholder="tp_hasil_analisis"
                     value={config.tableName}
+                    readOnly={config.isLocked}
                     onChange={(e) => setConfig({ ...config, tableName: e.target.value.trim() })}
-                    className="w-full px-3.5 py-2.5 bg-white border border-slate-300 rounded-xl font-mono text-xs font-bold text-emerald-950 focus:ring-2 focus:ring-emerald-500 focus:outline-none mb-2"
+                    className={`w-full px-3.5 py-2.5 border rounded-xl font-mono text-xs font-bold text-emerald-950 focus:ring-2 focus:ring-emerald-500 focus:outline-none mb-2 transition-colors ${
+                      config.isLocked 
+                        ? 'bg-slate-100 border-slate-300 text-slate-700 cursor-not-allowed' 
+                        : 'bg-white border-slate-300'
+                    }`}
                   />
-                  <div className="flex items-center gap-1.5 flex-wrap">
-                    {PRESET_TABLES.map(table => (
-                      <button
-                        key={table}
-                        type="button"
-                        onClick={() => setConfig({ ...config, tableName: table })}
-                        className={`px-2.5 py-1 rounded-lg border text-[11px] font-mono transition-colors ${
-                          config.tableName === table
-                            ? 'bg-emerald-700 text-white border-emerald-700'
-                            : 'bg-slate-100 text-slate-700 border-slate-200 hover:bg-slate-200'
-                        }`}
-                      >
-                        {table}
-                      </button>
-                    ))}
-                  </div>
+                  {!config.isLocked && (
+                    <div className="flex items-center gap-1.5 flex-wrap">
+                      {PRESET_TABLES.map(table => (
+                        <button
+                          key={table}
+                          type="button"
+                          onClick={() => setConfig({ ...config, tableName: table })}
+                          className={`px-2.5 py-1 rounded-lg border text-[11px] font-mono transition-colors ${
+                            config.tableName === table
+                              ? 'bg-emerald-700 text-white border-emerald-700'
+                              : 'bg-slate-100 text-slate-700 border-slate-200 hover:bg-slate-200'
+                          }`}
+                        >
+                          {table}
+                        </button>
+                      ))}
+                    </div>
+                  )}
                 </div>
 
                 {/* Explicit Column Configuration to ensure "Hasil Analisis" is selected and "Sementara" is ignored */}
@@ -779,11 +1083,24 @@ export const SupabaseSyncModal: React.FC<SupabaseSyncModalProps> = ({
                           DIGUNAKAN
                         </span>
                       </div>
+                      {detectedColumns.length > 0 && (
+                        <select
+                          value={config.tpColumn}
+                          onChange={(e) => setConfig({ ...config, tpColumn: e.target.value })}
+                          className="w-full px-3 py-2 bg-white border border-emerald-400 rounded-lg font-mono text-xs font-bold text-emerald-900 focus:ring-2 focus:ring-emerald-500 focus:outline-none mb-1.5 cursor-pointer shadow-2xs"
+                        >
+                          {detectedColumns.map(col => (
+                            <option key={col} value={col}>
+                              {col} {col.toLowerCase().includes('sementara') ? '(Peringatan: Kolom Sementara)' : ''}
+                            </option>
+                          ))}
+                        </select>
+                      )}
                       <input
                         type="text"
                         value={config.tpColumn}
                         onChange={(e) => setConfig({ ...config, tpColumn: e.target.value })}
-                        className="w-full px-3 py-2 bg-white border border-emerald-400 rounded-lg font-mono text-xs font-bold text-emerald-900 focus:ring-2 focus:ring-emerald-500 focus:outline-none"
+                        className="w-full px-3 py-1.5 bg-slate-50 border border-slate-300 rounded-lg font-mono text-xs text-slate-800"
                         placeholder="tujuan_pembelajaran_hasil_analisis"
                       />
                       <p className="text-[10px] text-emerald-800 mt-1">
@@ -813,44 +1130,88 @@ export const SupabaseSyncModal: React.FC<SupabaseSyncModalProps> = ({
 
                     <div>
                       <label className="block font-semibold text-slate-700 mb-1">Kolom Elemen PAI</label>
+                      {detectedColumns.length > 0 && (
+                        <select
+                          value={config.elementColumn}
+                          onChange={(e) => setConfig({ ...config, elementColumn: e.target.value })}
+                          className="w-full px-3 py-1.5 bg-white border border-slate-300 rounded-lg font-mono text-xs mb-1.5 cursor-pointer"
+                        >
+                          {detectedColumns.map(col => (
+                            <option key={col} value={col}>{col}</option>
+                          ))}
+                        </select>
+                      )}
                       <input
                         type="text"
                         value={config.elementColumn}
                         onChange={(e) => setConfig({ ...config, elementColumn: e.target.value })}
-                        className="w-full px-3 py-1.5 bg-white border border-slate-300 rounded-lg font-mono text-xs"
+                        className="w-full px-3 py-1 bg-slate-50 border border-slate-300 rounded-lg font-mono text-xs"
                         placeholder="elemen"
                       />
                     </div>
 
                     <div>
                       <label className="block font-semibold text-slate-700 mb-1">Kolom Semester</label>
+                      {detectedColumns.length > 0 && (
+                        <select
+                          value={config.semesterColumn}
+                          onChange={(e) => setConfig({ ...config, semesterColumn: e.target.value })}
+                          className="w-full px-3 py-1.5 bg-white border border-slate-300 rounded-lg font-mono text-xs mb-1.5 cursor-pointer"
+                        >
+                          {detectedColumns.map(col => (
+                            <option key={col} value={col}>{col}</option>
+                          ))}
+                        </select>
+                      )}
                       <input
                         type="text"
                         value={config.semesterColumn}
                         onChange={(e) => setConfig({ ...config, semesterColumn: e.target.value })}
-                        className="w-full px-3 py-1.5 bg-white border border-slate-300 rounded-lg font-mono text-xs"
+                        className="w-full px-3 py-1 bg-slate-50 border border-slate-300 rounded-lg font-mono text-xs"
                         placeholder="semester"
                       />
                     </div>
 
                     <div>
                       <label className="block font-semibold text-slate-700 mb-1">Kolom Kelas</label>
+                      {detectedColumns.length > 0 && (
+                        <select
+                          value={config.gradeColumn}
+                          onChange={(e) => setConfig({ ...config, gradeColumn: e.target.value })}
+                          className="w-full px-3 py-1.5 bg-white border border-slate-300 rounded-lg font-mono text-xs mb-1.5 cursor-pointer"
+                        >
+                          {detectedColumns.map(col => (
+                            <option key={col} value={col}>{col}</option>
+                          ))}
+                        </select>
+                      )}
                       <input
                         type="text"
                         value={config.gradeColumn}
                         onChange={(e) => setConfig({ ...config, gradeColumn: e.target.value })}
-                        className="w-full px-3 py-1.5 bg-white border border-slate-300 rounded-lg font-mono text-xs"
+                        className="w-full px-3 py-1 bg-slate-50 border border-slate-300 rounded-lg font-mono text-xs"
                         placeholder="kelas"
                       />
                     </div>
 
                     <div>
                       <label className="block font-semibold text-slate-700 mb-1">Kolom Materi Esensial</label>
+                      {detectedColumns.length > 0 && (
+                        <select
+                          value={config.materialColumn}
+                          onChange={(e) => setConfig({ ...config, materialColumn: e.target.value })}
+                          className="w-full px-3 py-1.5 bg-white border border-slate-300 rounded-lg font-mono text-xs mb-1.5 cursor-pointer"
+                        >
+                          {detectedColumns.map(col => (
+                            <option key={col} value={col}>{col}</option>
+                          ))}
+                        </select>
+                      )}
                       <input
                         type="text"
                         value={config.materialColumn}
                         onChange={(e) => setConfig({ ...config, materialColumn: e.target.value })}
-                        className="w-full px-3 py-1.5 bg-white border border-slate-300 rounded-lg font-mono text-xs"
+                        className="w-full px-3 py-1 bg-slate-50 border border-slate-300 rounded-lg font-mono text-xs"
                         placeholder="materi_esensial"
                       />
                     </div>
